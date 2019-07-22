@@ -12,12 +12,10 @@ from models.encoder_decoder import get_encoder_decoder
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-#model = torchvision.models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=21, aux_loss=None)
-
 decoder_name = 'fcn'
 encoder_name = 'vgg16'
 
-model = get_encoder_decoder(encoder_name, decoder_name, num_classes=21, fpn=False)
+model = get_encoder_decoder(encoder_name, decoder_name, num_classes=21, fpn=True)
 model = model.to(device)
 
 print(model)
