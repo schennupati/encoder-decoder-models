@@ -6,104 +6,136 @@ Created on Fri Jul 19 07:59:23 2019
 @author: sumche
 """
 import torch
-import torchvision
 import time
 import torch.optim as optim
 import matplotlib.pyplot as plt
-import numpy as np
 
 from torchvision.datasets import Cityscapes
 from torch import nn
-from models.encoder_decoder import get_encoder_decoder
 from torchvision import transforms
+
+from models.encoder_decoder import get_encoder_decoder
+from utils.metrics import runningScore, averageMeter
 from utils.loss import cross_entropy2d
+from utils.im_utils import decode_segmap, transform_targets,convert_targets
 
-gpus = [0,1]
-#gpus = [0]
+#gpus = [0,1]
+gpus = list(range(torch.cuda.device_count()))
 
-def imshow(img):
-    img = img / 2 + 0.5     # unnormalize
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    #plt.show()
+
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 decoder_name = 'fcn'
-encoder_name = 'resnet101'
+encoder_name = 'resnet50'
+im_size = 256 
+n_classes = 19
 
-model = get_encoder_decoder(encoder_name, decoder_name, num_classes=34, fpn=True)
-model = model.to(device)
 
-if len(gpus) > 1:
-    model = nn.DataParallel(model, device_ids=gpus, dim=0)
 
-transform = transforms.Compose([transforms.Resize(512),transforms.ToTensor(),
+transform = transforms.Compose([transforms.Resize(im_size),transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-target_transform = transforms.Compose([transforms.Resize(512),transforms.ToTensor()])
-dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='train', mode='fine',
+
+target_transform = transforms.Compose([transforms.Resize(im_size),transforms.ToTensor()])
+
+train_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='train', mode='fine',
                      target_type='semantic',transform=transform,target_transform=target_transform)
-data_loader = torch.utils.data.DataLoader(dataset,
+val_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='val', mode='fine',
+                     target_type='semantic',transform=transform,target_transform=target_transform)
+
+train_loader = torch.utils.data.DataLoader(train_dataset,
                                           batch_size=4,
                                           shuffle=True,
                                           num_workers=8)
-dataiter = iter(data_loader)
-data,label = dataiter.next()
-label = label*255
+
+val_loader = torch.utils.data.DataLoader(val_dataset,
+                                          batch_size=4,
+                                          shuffle=True,
+                                          num_workers=8)
+
+dataiter = iter(train_loader)
+data,targets = dataiter.next()
+targets = convert_targets(transform_targets(targets))
+
+#print(np.unique(targets[0]))
+#rgb = decode_segmap(targets[0])
+#plt.imshow(rgb)
+
+
 #print(np.unique(label.numpy()))
-imshow(torchvision.utils.make_grid(data))
+#imshow(torchvision.utils.make_grid(data))
 
 #print(data.size())
 #print(label.size())
 #print(label.long())
 #print(model)
-t = time.time()
-for i in range(1000):
-    data,label = dataiter.next()
-    label = label*255
-    label = torch.squeeze(label.permute(0,2,3,1))
-    model.zero_grad()
-    output = model(data.to(device))
-    om = torch.argmax(output.squeeze(), dim=1).detach().cpu().numpy()
+
+model = get_encoder_decoder(encoder_name, decoder_name, num_classes=n_classes, fpn=True)
+model = model.to(device)
+if len(gpus) > 1:
+    model = nn.DataParallel(model, device_ids=gpus, dim=0)
+
+running_metrics_val = runningScore(n_classes)
+
+train_loss_meter = averageMeter()
+val_loss_meter   = averageMeter()
+time_meter       = averageMeter()
     
-    loss = cross_entropy2d(output, label.long().to(device))
-    optimizer = optim.SGD(model.parameters(), lr=0.01)
-    print(i,loss.item())
-    
-    loss.backward()
-    optimizer.step()
-elapsed = time.time() - t
-
-
-print(elapsed/100)
-
-def decode_segmap(image, nc=33):
-   
-  label_colors = np.array([(0, 0, 0),  # 0=background
-               # 1=aeroplane, 2=bicycle, 3=bird, 4=boat, 5=bottle
-               (128, 0, 0), (0, 128, 0), (128, 128, 0), (0, 0, 128), (128, 0, 128),
-               # 6=bus, 7=car, 8=cat, 9=chair, 10=cow
-               (0, 128, 128), (128, 128, 128), (64, 0, 0), (192, 0, 0), (64, 128, 0),
-               # 11=dining table, 12=dog, 13=horse, 14=motorbike, 15=person
-               (192, 128, 0), (64, 0, 128), (192, 0, 128), (64, 128, 128), (192, 128, 128),
-               # 16=potted plant, 17=sheep, 18=sofa, 19=train, 20=tv/monitor
-               (0, 64, 0), (128, 64, 0), (0, 192, 0), (128, 192, 0), (0, 64, 128),
-               (0, 64, 0), (128, 64, 0), (0, 192, 0), (128, 192, 0), (0, 64, 128),
-               (0, 64, 0), (128, 64, 0), (0, 192, 0), (128, 192, 0), (0, 64, 128),
-               (0, 64, 0), (128, 64, 0)])
- 
-  r = np.zeros_like(image).astype(np.uint8)
-  g = np.zeros_like(image).astype(np.uint8)
-  b = np.zeros_like(image).astype(np.uint8)
-   
-  for l in range(0, nc):
-    idx = image == l
-    r[idx] = label_colors[l, 0]
-    g[idx] = label_colors[l, 1]
-    b[idx] = label_colors[l, 2]
-     
-  rgb = np.stack([r, g, b], axis=2)
-  return rgb
-
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
+  
+for epoch in range(5):
+    print('********************** '+str(epoch+1)+' **********************')
+    for i, data in enumerate(train_loader, 0):
+        t = time.time()
+        
+        inputs,targets = data
+        targets = convert_targets(transform_targets(targets))
+        #labels = labels*255
+        #labels = torch.squeeze(labels.permute(0,2,3,1))
+                
+        optimizer.zero_grad()
+        
+        outputs = model(inputs.to(device))
+        loss = cross_entropy2d(outputs, targets.long().to(device))
+        loss.backward()
+        optimizer.step()
+        
+        time_meter.update(time.time() - t)
+        
+        train_loss_meter.update(loss.item())
+        
+        if i % 10 == 9:        
+            print('epoch: %d batch: %5d time_per_batch: %.3f  loss: %.3f' %
+                      (epoch + 1, i + 1, time_meter.avg , train_loss_meter.avg))
+            running_loss = 0.0
+            train_loss_meter.reset()
+            time_meter.reset()
+        
+    with torch.no_grad():
+        for data in val_loader:
+            images, targets = data
+            targets = convert_targets(transform_targets(targets))
+            #labels = labels*255
+            #labels = torch.squeeze(labels.permute(0,2,3,1))
+            outputs  = model(images.to(device))
+            val_loss = cross_entropy2d(outputs, targets.long().to(device))
+            pred = outputs.data.max(1)[1].cpu().numpy()
+            gt = targets.data.cpu().numpy()
+            
+            running_metrics_val.update(gt, pred)
+            val_loss_meter.update(val_loss.item())
+            
+    score, class_iou = running_metrics_val.get_scores()
+            
+    for k,v in score.items():
+        print(k,v)
+                
+    for k,v in class_iou.items():
+        print(k,v)
+            
+    running_metrics_val.reset()
+    val_loss_meter.reset()
+                        
+om = torch.argmax(outputs.squeeze(), dim=1).detach().cpu().numpy()
 rgb = decode_segmap(om[0])
 plt.imshow(rgb)

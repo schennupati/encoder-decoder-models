@@ -10,7 +10,7 @@ Created on Fri Jul 19 08:32:02 2019
 #TODO: Update to use VGG, DenseNet etc  
 #TODO: Update to use PSPNet, DeepLabV3 etc as decoders
 #TODO: Implement multi-task feature.
-import torch
+
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models import resnet
 from models.vgg import VGGNet

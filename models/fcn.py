@@ -1,8 +1,6 @@
 from collections import OrderedDict
 from torch import nn
-import torch.nn.functional as F
 
-#TODO: Update FCN to take FCN8,FCN16 or FCN32 based on inplanes
 #TODO: Update FCN to take Cross-Stitch
 
 class _FCNModel(nn.Module):
@@ -49,9 +47,6 @@ class _FCNModel(nn.Module):
         #score = F.softmax(score,dim=1)
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
-
-
-
 
 class FCN(_FCNModel):
     """
@@ -127,12 +122,6 @@ class _FPN_FCNModel(nn.Module):
         layers.append(nn.BatchNorm2d(out_channels))
         
         return nn.Sequential(*layers)
-        
-        
-        
-
-
-
 
 class FPN_FCN(_FPN_FCNModel):
     """
