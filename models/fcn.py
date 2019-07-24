@@ -46,7 +46,7 @@ class _FCNModel(nn.Module):
         score = score   # element-wise add, size=(N, 64, x.H/2, x.W/2)
         score = self.bn5(self.relu(self.deconv5(score)))  # size=(N, 32, x.H, x.W)
         score = self.classifier(score)                    # size=(N, n_class, x.H/1, x.W/1)
-        score = F.softmax(score,dim=1)
+        #score = F.softmax(score,dim=1)
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
 
@@ -111,7 +111,7 @@ class _FPN_FCNModel(nn.Module):
         # size=(N, n_class, x.H/1, x.W/1)
         score = self.upsample5(score)
         score = self.classifier(score)
-        score = F.softmax(score,dim=1)
+        #score = F.softmax(score,dim=1)
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
     

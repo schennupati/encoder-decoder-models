@@ -70,10 +70,10 @@ def get_encoder_decoder(encoder_name, decoder_name, num_classes, fpn=False, pret
                 'fcn': (FCN)
                     }
         
-    out = encoder(torch.rand(1, 3, 512, 512))
+    #out = encoder(torch.rand(1, 3, 512, 512))
     
-    for _,layer in out.items():
-        print(layer.size())
+    #for _,layer in out.items():
+    #    print(layer.size())
 
     inplanes = inplanes_map[encoder_name]
     base_model = model_map[decoder_name]
