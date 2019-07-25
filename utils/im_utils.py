@@ -85,6 +85,30 @@ labels = [
     Label(  'bicycle'              , 33 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) ),
     Label(  'license plate'        , -1 ,       -1 , 'vehicle'         , 7       , False        , True         , (  0,  0,142) ),
 ]
+
+cat_labels = [
+    #       name                     id    trainId   category            catId     hasInstances   ignoreInEval   color
+    
+    Label(  'road'                 ,  0 ,        0 , 'flat'            , 1       , False        , False        , (128, 64,128) ),
+    Label(  'sidewalk'             ,  1 ,        1 , 'flat'            , 1       , False        , False        , (244, 35,232) ),
+    Label(  'building'             ,  2 ,        2 , 'construction'    , 2       , False        , False        , ( 70, 70, 70) ),
+    Label(  'wall'                 ,  3 ,        3 , 'construction'    , 2       , False        , False        , (102,102,156) ),
+    Label(  'fence'                ,  4 ,        4 , 'construction'    , 2       , False        , False        , (190,153,153) ),
+    Label(  'pole'                 ,  5 ,        5 , 'object'          , 3       , False        , False        , (153,153,153) ),
+    Label(  'traffic light'        ,  6 ,        6 , 'object'          , 3       , False        , False        , (250,170, 30) ),
+    Label(  'traffic sign'         ,  7 ,        7 , 'object'          , 3       , False        , False        , (220,220,  0) ),
+    Label(  'vegetation'           ,  8 ,        8 , 'nature'          , 4       , False        , False        , (107,142, 35) ),
+    Label(  'terrain'              ,  9 ,        9 , 'nature'          , 4       , False        , False        , (152,251,152) ),
+    Label(  'sky'                  , 10 ,       10 , 'sky'             , 5       , False        , False        , ( 70,130,180) ),
+    Label(  'person'               , 11 ,       11 , 'human'           , 6       , True         , False        , (220, 20, 60) ),
+    Label(  'rider'                , 12 ,       12 , 'human'           , 6       , True         , False        , (255,  0,  0) ),
+    Label(  'car'                  , 13 ,       13 , 'vehicle'         , 7       , True         , False        , (  0,  0,142) ),
+    Label(  'truck'                , 14 ,       14 , 'vehicle'         , 7       , True         , False        , (  0,  0, 70) ),
+    Label(  'bus'                  , 15 ,       15 , 'vehicle'         , 7       , True         , False        , (  0, 60,100) ),
+    Label(  'train'                , 16 ,       16 , 'vehicle'         , 7       , True         , False        , (  0, 80,100) ),
+    Label(  'motorcycle'           , 17 ,       17 , 'vehicle'         , 7       , True         , False        , (  0,  0,230) ),
+    Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) )
+]
         
 def get_trainId(id,labels=labels):
     for i, label in enumerate(labels):

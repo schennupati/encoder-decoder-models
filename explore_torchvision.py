@@ -7,8 +7,11 @@ Created on Fri Jul 19 07:59:23 2019
 """
 import torch
 import time
+import os
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import datetime
+import glob
 
 from torchvision.datasets import Cityscapes
 from torch import nn
@@ -17,16 +20,29 @@ from torchvision import transforms
 from models.encoder_decoder import get_encoder_decoder
 from utils.metrics import runningScore, averageMeter
 from utils.loss import cross_entropy2d
-from utils.im_utils import decode_segmap, transform_targets, convert_targets, get_class_weights
+from utils.im_utils import decode_segmap, transform_targets, convert_targets, cat_labels
+#from utils.im_utils import get_class_weights
 
 gpus = list(range(torch.cuda.device_count()))
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 decoder_name = 'fcn'
-encoder_name = 'resnet101'
-im_size = 512
+encoder_name = 'resnet18'
+im_size = 256
 batch_size = 4 
 n_classes = 19
+pyramid_networks = False
+best_iou = -100.0
+resume_training = True
+
+base_dir =  os.path.join(os.path.expanduser('~'),'results')
+if not os.path.exists(base_dir):
+    os.makedirs(base_dir)
+
+decoder = 'fpn' if pyramid_networks else 'fcn'    
+exp_name  =  (encoder_name + '-' + str(decoder) +
+             '-' + str(im_size) + '-' + str(n_classes))
+time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
 
 transform = transforms.Compose([transforms.Resize(im_size),transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
@@ -52,8 +68,9 @@ dataiter = iter(train_loader)
 data,targets = dataiter.next()
 targets = convert_targets(transform_targets(targets))
 
-model = get_encoder_decoder(encoder_name, decoder_name, num_classes=n_classes, fpn=True)
+model = get_encoder_decoder(encoder_name, decoder_name, num_classes=n_classes, fpn=pyramid_networks)
 model = model.to(device)
+
 if len(gpus) > 1:
     model = nn.DataParallel(model, device_ids=gpus, dim=0)
 
@@ -76,15 +93,26 @@ class_weights = [3.0309219731075485, 12.783811398373516, 4.6281263808532,
 
 class_weights = torch.FloatTensor(class_weights).cuda()
 
-for epoch in range(100):
+list_of_models = glob.glob(os.path.join(base_dir,'*.pkl'))
+
+if any(exp_name in model for model in list_of_models) and resume_training:
+    latest_model = max(list_of_models, key=os.path.getctime)
+    checkpoint = torch.load(latest_model)
+    model.load_state_dict(checkpoint["model_state"])
+    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    start_iter = int(checkpoint["epoch"]/len(train_loader))-1
+    print("Loaded checkpoint '{}' (epoch {})".format(latest_model, start_iter))
+    
+else:
+    print("Begining Training from Scratch")
+
+for epoch in range(1):
     print('********************** '+str(epoch+1)+' **********************')
     for i, data in enumerate(train_loader, 0):
         t = time.time()
         
         inputs,targets = data
         targets = convert_targets(transform_targets(targets))
-        #labels = labels*255
-        #labels = torch.squeeze(labels.permute(0,2,3,1))
                 
         optimizer.zero_grad()
         
@@ -93,8 +121,7 @@ for epoch in range(100):
         loss.backward()
         optimizer.step()
         
-        time_meter.update(time.time() - t)
-        
+        time_meter.update(time.time() - t)        
         train_loss_meter.update(loss.item())
         
         if i % 10 == 9:        
@@ -103,7 +130,7 @@ for epoch in range(100):
             running_loss = 0.0
             train_loss_meter.reset()
             time_meter.reset()
-        
+
     with torch.no_grad():
         for data in val_loader:
             images, targets = data
@@ -122,10 +149,20 @@ for epoch in range(100):
         print(k,v)
                 
     for k,v in class_iou.items():
-        print(k,v)
+        print(cat_labels[k].name,': ',v)
             
     running_metrics_val.reset()
     val_loss_meter.reset()
+    
+    if score["Mean IoU : \t"] >= best_iou:
+        best_iou = score["Mean IoU : \t"]
+        state = {"epoch": i + 1,
+                 "model_state": model.state_dict(),
+                 "optimizer_state": optimizer.state_dict(),
+                 "best_iou": best_iou}
+        save_path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
+        torch.save(state, save_path)
+        print("Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch))
                         
 om = torch.argmax(outputs.squeeze(), dim=1).detach().cpu().numpy()
 rgb = decode_segmap(om[0])
