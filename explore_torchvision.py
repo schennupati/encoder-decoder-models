@@ -17,21 +17,16 @@ from torchvision import transforms
 from models.encoder_decoder import get_encoder_decoder
 from utils.metrics import runningScore, averageMeter
 from utils.loss import cross_entropy2d
-from utils.im_utils import decode_segmap, transform_targets,convert_targets
+from utils.im_utils import decode_segmap, transform_targets, convert_targets, get_class_weights
 
-#gpus = [0,1]
 gpus = list(range(torch.cuda.device_count()))
-
-
-
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 decoder_name = 'fcn'
-encoder_name = 'resnet50'
-im_size = 256 
+encoder_name = 'resnet101'
+im_size = 512
+batch_size = 4 
 n_classes = 19
-
-
 
 transform = transforms.Compose([transforms.Resize(im_size),transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
@@ -44,31 +39,18 @@ val_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='val', mode='
                      target_type='semantic',transform=transform,target_transform=target_transform)
 
 train_loader = torch.utils.data.DataLoader(train_dataset,
-                                          batch_size=4,
+                                          batch_size=batch_size,
                                           shuffle=True,
                                           num_workers=8)
 
 val_loader = torch.utils.data.DataLoader(val_dataset,
-                                          batch_size=4,
+                                          batch_size=batch_size,
                                           shuffle=True,
                                           num_workers=8)
 
 dataiter = iter(train_loader)
 data,targets = dataiter.next()
 targets = convert_targets(transform_targets(targets))
-
-#print(np.unique(targets[0]))
-#rgb = decode_segmap(targets[0])
-#plt.imshow(rgb)
-
-
-#print(np.unique(label.numpy()))
-#imshow(torchvision.utils.make_grid(data))
-
-#print(data.size())
-#print(label.size())
-#print(label.long())
-#print(model)
 
 model = get_encoder_decoder(encoder_name, decoder_name, num_classes=n_classes, fpn=True)
 model = model.to(device)
@@ -82,8 +64,19 @@ val_loss_meter   = averageMeter()
 time_meter       = averageMeter()
     
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
-  
-for epoch in range(5):
+
+#class_weights = get_class_weights(train_loader,n_classes)
+class_weights = [3.0309219731075485, 12.783811398373516, 4.6281263808532, 
+                 33.466829282994446, 32.37214980477001, 33.69941903632168, 
+                 41.312452367374135, 35.31661830466744, 6.191211436807339, 
+                 30.51037629066412, 17.300065531616138, 32.314456409694635, 
+                 44.92898754596857, 11.933240015436805, 44.386160408368625, 
+                 45.16117055995425, 45.113897310212835, 48.01339129145941, 
+                 43.18769924298604] #CityScapes 19 Classes weights
+
+class_weights = torch.FloatTensor(class_weights).cuda()
+
+for epoch in range(100):
     print('********************** '+str(epoch+1)+' **********************')
     for i, data in enumerate(train_loader, 0):
         t = time.time()
@@ -96,7 +89,7 @@ for epoch in range(5):
         optimizer.zero_grad()
         
         outputs = model(inputs.to(device))
-        loss = cross_entropy2d(outputs, targets.long().to(device))
+        loss = cross_entropy2d(outputs, targets.long().to(device),weight=class_weights)
         loss.backward()
         optimizer.step()
         
@@ -115,10 +108,8 @@ for epoch in range(5):
         for data in val_loader:
             images, targets = data
             targets = convert_targets(transform_targets(targets))
-            #labels = labels*255
-            #labels = torch.squeeze(labels.permute(0,2,3,1))
             outputs  = model(images.to(device))
-            val_loss = cross_entropy2d(outputs, targets.long().to(device))
+            val_loss = cross_entropy2d(outputs, targets.long().to(device),weight=class_weights)
             pred = outputs.data.max(1)[1].cpu().numpy()
             gt = targets.data.cpu().numpy()
             

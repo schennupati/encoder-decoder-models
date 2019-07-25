@@ -10,20 +10,18 @@ class _FCNModel(nn.Module):
         self.n_class = n_class
         self.backbone = backbone
         self.relu    = nn.ReLU(inplace=True)
-        self.feat1   = nn.Sequential(nn.Conv2d(in_planes[0], 1024, 1), nn.ReLU(inplace=True))
-        self.deconv1 = nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn1     = nn.BatchNorm2d(512)
-        self.feat2   = nn.Sequential(nn.Conv2d(in_planes[1], 512, 1), nn.ReLU(inplace=True))
-        self.deconv2 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn2     = nn.BatchNorm2d(256)
-        self.feat3   = nn.Sequential(nn.Conv2d(in_planes[2], 256, 1), nn.ReLU(inplace=True))
-        self.deconv3 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn3     = nn.BatchNorm2d(128)
-        self.deconv4 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn4     = nn.BatchNorm2d(64)
-        self.deconv5 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn5     = nn.BatchNorm2d(32)
-        self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
+        self.feat1   = nn.Sequential(nn.Conv2d(in_planes[0], n_class, 1), nn.ReLU(inplace=True))
+        self.deconv1 = nn.ConvTranspose2d(n_class, n_class, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
+        self.bn1     = nn.BatchNorm2d(n_class)
+        self.feat2   = nn.Sequential(nn.Conv2d(in_planes[1], n_class, 1), nn.ReLU(inplace=True))
+        self.deconv2 = nn.ConvTranspose2d(n_class, n_class, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
+        self.bn2     = nn.BatchNorm2d(n_class)
+        self.feat3   = nn.Sequential(nn.Conv2d(in_planes[2], n_class, 1), nn.ReLU(inplace=True))
+        self.deconv3 = nn.ConvTranspose2d(n_class, n_class, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
+        self.bn3     = nn.BatchNorm2d(n_class)
+        self.deconv4 = nn.ConvTranspose2d(n_class, n_class, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
+        self.bn4     = nn.BatchNorm2d(n_class)
+        self.deconv5 = nn.ConvTranspose2d(n_class, n_class, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
 
     def forward(self, x):
         output = self.backbone(x)
@@ -42,9 +40,7 @@ class _FCNModel(nn.Module):
         score = score   # element-wise add, size=(N, 128, x.H/4, x.W/4)
         score = self.bn4(self.relu(self.deconv4(score)))  # size=(N, 64, x.H/2, x.W/2)
         score = score   # element-wise add, size=(N, 64, x.H/2, x.W/2)
-        score = self.bn5(self.relu(self.deconv5(score)))  # size=(N, 32, x.H, x.W)
-        score = self.classifier(score)                    # size=(N, n_class, x.H/1, x.W/1)
-        #score = F.softmax(score,dim=1)
+        score = self.relu(self.deconv5(score))  # size=(N, 32, x.H, x.W)
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
 
@@ -81,8 +77,7 @@ class _FPN_FCNModel(nn.Module):
         self.bn3          = nn.BatchNorm2d(self.out_channels)
         self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[0], self.out_channels, 3,padding=1), nn.ReLU(inplace=True))
         self.bn4          = nn.BatchNorm2d(self.out_channels)
-        self.upsample5    = self.upsample(self.out_channels,self.out_channels,1,4,2)
-        self.classifier   = nn.Conv2d(self.out_channels, self.n_class, kernel_size=1)
+        self.upsample5    = self.upsample(self.out_channels,self.n_class,1,4,2)
 
     def forward(self, x):
         output = self.backbone(x)
@@ -105,21 +100,16 @@ class _FPN_FCNModel(nn.Module):
         score = feat1 + feat2 + feat3 + feat4
         # size=(N, n_class, x.H/1, x.W/1)
         score = self.upsample5(score)
-        score = self.classifier(score)
-        #score = F.softmax(score,dim=1)
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
     
-    def upsample(self,in_channels,out_channels,kernel_size=3,factor=2,dilation=1):
+    def upsample(self,in_channels,out_channels,kernel_size=3,factor=2,dilation=1,bn=True):
         
         layers = []
         layers.append(nn.Conv2d(in_channels, out_channels, kernel_size,padding=int(kernel_size/2)))
         layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.ConvTranspose2d(out_channels, out_channels, 
-                                         kernel_size=3,stride=factor, 
-                                         padding=1, dilation=dilation, output_padding=1))
+        layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True))
         layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.BatchNorm2d(out_channels))
         
         return nn.Sequential(*layers)
 

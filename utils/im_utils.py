@@ -128,3 +128,36 @@ def imshow(img):
     npimg = img.numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
     #plt.show()
+    
+def get_class_weights(loader,num_classes):
+    trainId_to_count = {}
+    for trainId in range(num_classes):
+        trainId_to_count[trainId] = 0
+
+    # get the total number of pixels in all train label_imgs that are of each object class:
+    for step, data in enumerate(loader):
+        if step % 100 == 0:
+            print (step)
+        _,labels = data
+        for label_img in labels: 
+            label_img = convert_targets(torch.squeeze((label_img*255).permute(1,2,0)))
+
+            for trainId in range(num_classes):
+                # count how many pixels in label_img which are of object class trainId:
+                
+                trainId_mask = np.equal(label_img, trainId)
+                trainId_count = torch.sum(trainId_mask)
+
+                # add to the total count:
+                trainId_to_count[trainId] += trainId_count
+
+    #compute the class weights according to the ENet paper:
+    class_weights = []
+    total_count = sum(trainId_to_count.values())
+    for trainId, count in trainId_to_count.items():
+        trainId_prob = float(count)/float(total_count)
+        trainId_weight = 1/np.log(1.02 + trainId_prob)
+        class_weights.append(trainId_weight)
+
+    print (class_weights)
+    return class_weights
