@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import datetime
 import glob
 
-from data_loaders import Cityscapes
+from torchvision.datasets import Cityscapes
 from torch import nn
 from torchvision import transforms
 
@@ -28,11 +28,12 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 encoder_name = 'resnet101'
 decoder_name = 'fpn'
-tasks = {'seg':19,'dep':1}
+tasks = {'seg':19}#,'dep':1}
 im_size = 512
 batch_size = 4 
 best_iou = -100.0
 resume_training = True
+epochs = 100
 
 base_dir =  os.path.join(os.path.expanduser('~'),'results')
 if not os.path.exists(base_dir):
@@ -105,7 +106,7 @@ if any(exp_name in model for model in list_of_models) and resume_training:
     
 else:
     print("Begining Training from Scratch")
-for epoch in range(1):
+for epoch in range(epochs):
     print('********************** '+str(epoch+1)+' **********************')
     for i, data in enumerate(train_loader, 0):
         t = time.time()
@@ -166,5 +167,5 @@ for epoch in range(1):
 om = torch.argmax(outputs[0].squeeze(), dim=1).detach().cpu().numpy()
 rgb = decode_segmap(om[0])
 plt.imshow(rgb)
-om = outputs[1].squeeze().detach().cpu().numpy()
-plt.imshow(om[0])
+#om = outputs[1].squeeze().detach().cpu().numpy()
+#plt.imshow(om[0])
