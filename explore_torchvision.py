@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import datetime
 import glob
 
-from torchvision.datasets import Cityscapes
+from data_loaders import Cityscapes
 from torch import nn
 from torchvision import transforms
 
@@ -26,12 +26,11 @@ from utils.im_utils import decode_segmap, transform_targets, convert_targets, ca
 gpus = list(range(torch.cuda.device_count()))
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-decoder_name = 'fcn'
-encoder_name = 'resnet18'
-im_size = 256
+encoder_name = 'resnet101'
+decoder_name = 'fpn'
+tasks = {'seg':19,'dep':1}
+im_size = 512
 batch_size = 4 
-n_classes = 19
-pyramid_networks = False
 best_iou = -100.0
 resume_training = True
 
@@ -39,9 +38,8 @@ base_dir =  os.path.join(os.path.expanduser('~'),'results')
 if not os.path.exists(base_dir):
     os.makedirs(base_dir)
 
-decoder = 'fpn' if pyramid_networks else 'fcn'    
-exp_name  =  (encoder_name + '-' + str(decoder) +
-             '-' + str(im_size) + '-' + str(n_classes))
+exp_name  =  (encoder_name + '-' + str(decoder_name) +
+             '-' + str(im_size) + '-' + '_'.join(tasks.keys()))
 time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
 
 transform = transforms.Compose([transforms.Resize(im_size),transforms.ToTensor(),
@@ -68,13 +66,15 @@ dataiter = iter(train_loader)
 data,targets = dataiter.next()
 targets = convert_targets(transform_targets(targets))
 
-model = get_encoder_decoder(encoder_name, decoder_name, num_classes=n_classes, fpn=pyramid_networks)
+model = get_encoder_decoder(encoder_name, decoder_name, tasks=tasks)
 model = model.to(device)
+
+print(model)
 
 if len(gpus) > 1:
     model = nn.DataParallel(model, device_ids=gpus, dim=0)
 
-running_metrics_val = runningScore(n_classes)
+running_metrics_val = runningScore(tasks['seg'])
 
 train_loss_meter = averageMeter()
 val_loss_meter   = averageMeter()
@@ -83,13 +83,13 @@ time_meter       = averageMeter()
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 #class_weights = get_class_weights(train_loader,n_classes)
-class_weights = [3.0309219731075485, 12.783811398373516, 4.6281263808532, 
-                 33.466829282994446, 32.37214980477001, 33.69941903632168, 
-                 41.312452367374135, 35.31661830466744, 6.191211436807339, 
-                 30.51037629066412, 17.300065531616138, 32.314456409694635, 
-                 44.92898754596857, 11.933240015436805, 44.386160408368625, 
-                 45.16117055995425, 45.113897310212835, 48.01339129145941, 
-                 43.18769924298604] #CityScapes 19 Classes weights
+class_weights = [3.045383480249677, 12.862127312658735, 4.509888876996228, 
+                 38.15694593009221, 35.25278401818165, 31.48260832348194, 
+                 45.79224481584843, 39.69406346608758, 6.0639281852733715, 
+                 32.16484408952653, 17.10923371690307, 31.5633201415795, 
+                 47.33397232867321, 11.610673599796504, 44.60042610251128, 
+                 45.23705196392834, 45.28288297518183, 48.14776939659858, 
+                 41.924631833506794] #CityScapes 19 Classes weights
 
 class_weights = torch.FloatTensor(class_weights).cuda()
 
@@ -105,7 +105,6 @@ if any(exp_name in model for model in list_of_models) and resume_training:
     
 else:
     print("Begining Training from Scratch")
-
 for epoch in range(1):
     print('********************** '+str(epoch+1)+' **********************')
     for i, data in enumerate(train_loader, 0):
@@ -117,7 +116,7 @@ for epoch in range(1):
         optimizer.zero_grad()
         
         outputs = model(inputs.to(device))
-        loss = cross_entropy2d(outputs, targets.long().to(device),weight=class_weights)
+        loss = cross_entropy2d(outputs[0], targets.long().to(device),weight=class_weights)
         loss.backward()
         optimizer.step()
         
@@ -136,8 +135,8 @@ for epoch in range(1):
             images, targets = data
             targets = convert_targets(transform_targets(targets))
             outputs  = model(images.to(device))
-            val_loss = cross_entropy2d(outputs, targets.long().to(device),weight=class_weights)
-            pred = outputs.data.max(1)[1].cpu().numpy()
+            val_loss = cross_entropy2d(outputs[0], targets.long().to(device),weight=class_weights)
+            pred = outputs[0].data.max(1)[1].cpu().numpy()
             gt = targets.data.cpu().numpy()
             
             running_metrics_val.update(gt, pred)
@@ -164,6 +163,8 @@ for epoch in range(1):
         torch.save(state, save_path)
         print("Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch))
                         
-om = torch.argmax(outputs.squeeze(), dim=1).detach().cpu().numpy()
+om = torch.argmax(outputs[0].squeeze(), dim=1).detach().cpu().numpy()
 rgb = decode_segmap(om[0])
 plt.imshow(rgb)
+om = outputs[1].squeeze().detach().cpu().numpy()
+plt.imshow(om[0])

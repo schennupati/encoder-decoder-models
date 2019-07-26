@@ -3,6 +3,8 @@ from __future__ import print_function
 
 import torch.nn as nn
 from torchvision.models.vgg import VGG
+from torchvision import models
+
 
 class VGGNet(VGG):
     def __init__(self, pretrained=True, model='vgg16', requires_grad=True, remove_fc=True, show_params=False):
