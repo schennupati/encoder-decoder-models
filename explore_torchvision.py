@@ -27,13 +27,15 @@ gpus = list(range(torch.cuda.device_count()))
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 encoder_name = 'resnet101'
-decoder_name = 'fpn'
+decoder_name = 'fcn'
 tasks = {'seg':19}#,'dep':1}
 im_size = 512
 batch_size = 4 
 best_iou = -100.0
 resume_training = True
 epochs = 100
+patience = 5
+early_stop = True
 
 base_dir =  os.path.join(os.path.expanduser('~'),'results')
 if not os.path.exists(base_dir):
@@ -101,11 +103,14 @@ if any(exp_name in model for model in list_of_models) and resume_training:
     checkpoint = torch.load(latest_model)
     model.load_state_dict(checkpoint["model_state"])
     optimizer.load_state_dict(checkpoint["optimizer_state"])
-    start_iter = int(checkpoint["epoch"]/len(train_loader))-1
+    start_iter = checkpoint["epoch"]
     print("Loaded checkpoint '{}' (epoch {})".format(latest_model, start_iter))
     
 else:
     print("Begining Training from Scratch")
+
+plateau_count = 0
+
 for epoch in range(epochs):
     print('********************** '+str(epoch+1)+' **********************')
     for i, data in enumerate(train_loader, 0):
@@ -130,7 +135,6 @@ for epoch in range(epochs):
             running_loss = 0.0
             train_loss_meter.reset()
             time_meter.reset()
-
     with torch.no_grad():
         for data in val_loader:
             images, targets = data
@@ -153,17 +157,23 @@ for epoch in range(epochs):
             
     running_metrics_val.reset()
     val_loss_meter.reset()
-    
     if score["Mean IoU : \t"] >= best_iou:
         best_iou = score["Mean IoU : \t"]
-        state = {"epoch": i + 1,
+        state = {"epoch": epoch + 1,
                  "model_state": model.state_dict(),
                  "optimizer_state": optimizer.state_dict(),
                  "best_iou": best_iou}
         save_path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
         torch.save(state, save_path)
-        print("Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch))
-                        
+        print("Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
+        plateau_count = 0
+    else:
+        plateau_count +=1
+    
+    if plateau_count == patience and early_stop:
+        print('Early Stopping: Patience of {} epochs reached.')
+        break
+    
 om = torch.argmax(outputs[0].squeeze(), dim=1).detach().cpu().numpy()
 rgb = decode_segmap(om[0])
 plt.imshow(rgb)
