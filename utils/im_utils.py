@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from collections import namedtuple
+from tqdm import tqdm
 
 Label = namedtuple( 'Label' , [
 
@@ -107,7 +108,8 @@ cat_labels = [
     Label(  'bus'                  , 15 ,       15 , 'vehicle'         , 7       , True         , False        , (  0, 60,100) ),
     Label(  'train'                , 16 ,       16 , 'vehicle'         , 7       , True         , False        , (  0, 80,100) ),
     Label(  'motorcycle'           , 17 ,       17 , 'vehicle'         , 7       , True         , False        , (  0,  0,230) ),
-    Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) )
+    Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) ),
+    Label(  'Dont Care'            , 19 ,       19 , 'vehicle'         , 7       , True         , False        , (0, 0, 0) )
 ]
         
 def get_trainId(id,labels=labels):
@@ -117,14 +119,16 @@ def get_trainId(id,labels=labels):
 
 def decode_segmap(image, nc=19, labels =labels):
    
-
   r = np.zeros_like(image).astype(np.uint8)
   g = np.zeros_like(image).astype(np.uint8)
   b = np.zeros_like(image).astype(np.uint8)
    
   for l in range(0, nc):
     idx = image == l
+    if l == 19:
+        l = 255
     l = get_trainId(l)
+
     r[idx] = labels[l].color[ 0]
     g[idx] = labels[l].color[ 1]
     b[idx] = labels[l].color[ 2]
@@ -132,18 +136,20 @@ def decode_segmap(image, nc=19, labels =labels):
   rgb = np.stack([r, g, b], axis=2)
   return rgb
 
-def transform_targets(targets):
-    return torch.squeeze((targets*255).permute(0,2,3,1))
+def transform_targets(targets,permute):
+    return torch.squeeze((targets*255).permute(permute))
     
-def convert_targets(targets,labels=labels):
+def convert_targets(targets,permute=(0,2,3,1),labels=labels):
     
-    targets = targets.numpy()
+    targets = transform_targets(targets,permute).numpy()
     new_targets = np.empty_like(targets)
     
     for label_id in np.unique(targets):
-        new_targets[np.where(targets==label_id)] = labels[int(label_id)].trainId
-        #new_targets = torch.from_numpy(new_targets)
-        
+        train_id = labels[int(label_id)].trainId
+        if train_id == 255:
+            train_id = 19
+        new_targets[np.where(targets==label_id)] = train_id
+    
     return torch.tensor(new_targets)
     
 
@@ -151,7 +157,7 @@ def imshow(img):
     img = img / 2 + 0.5     # unnormalize
     npimg = img.numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    #plt.show()
+    plt.show()
     
 def get_class_weights(loader,num_classes):
     trainId_to_count = {}
@@ -159,12 +165,10 @@ def get_class_weights(loader,num_classes):
         trainId_to_count[trainId] = 0
 
     # get the total number of pixels in all train label_imgs that are of each object class:
-    for step, data in enumerate(loader):
-        if step % 100 == 0:
-            print (step)
+    for data in tqdm(loader):
         _,labels = data
         for label_img in labels: 
-            label_img = convert_targets(torch.squeeze((label_img*255).permute(1,2,0)))
+            label_img = convert_targets(label_img, permute =(1,2,0))
 
             for trainId in range(num_classes):
                 # count how many pixels in label_img which are of object class trainId:
@@ -185,3 +189,36 @@ def get_class_weights(loader,num_classes):
 
     print (class_weights)
     return class_weights
+
+def cityscapes_class_weights(num_classes):
+    if num_classes == 20 :
+        class_weights = [2.955507538630981, 13.60952309186396, 5.56145316824849,
+                         37.623098044056555, 35.219757095290035, 30.4509054117227,
+                         46.155918742024745, 40.29336775103404, 7.1993048519013465,
+                         31.964755676368643, 24.369833379633036, 26.667508196892037,
+                         45.45602154799861, 9.738884687765038, 43.93387854348821,
+                         43.46301980622594, 44.61855914531797, 47.50842372150186,
+                         40.44117532401872, 12.772291423775606]
+        
+    elif num_classes == 19 :
+        class_weights = [3.045383480249677, 12.862127312658735, 4.509888876996228, 
+                         38.15694593009221, 35.25278401818165, 31.48260832348194, 
+                         45.79224481584843, 39.69406346608758, 6.0639281852733715, 
+                         32.16484408952653, 17.10923371690307, 31.5633201415795, 
+                         47.33397232867321, 11.610673599796504, 44.60042610251128, 
+                         45.23705196392834, 45.28288297518183, 48.14776939659858, 
+                         41.924631833506794]
+        
+    elif num_classes == 34:
+        return None #TODO: Compute weights
+    else:
+        raise ValueError('Invalid number of classes for Cityscapes dataset')
+    
+    return class_weights
+        
+
+
+class MyJointOp(object):
+    def __call__(self, input, target):
+        # perform something on input and target
+        return input, target
