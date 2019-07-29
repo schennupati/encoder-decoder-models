@@ -77,3 +77,9 @@ def bootstrapped_cross_entropy2d(input, target, K, weight=None, size_average=Tru
             size_average=size_average,
         )
     return loss / float(batch_size)
+
+def huber_loss(input, target, size_average=True):
+    loss = F.smooth_l1_loss(
+        input, target
+    )
+    return loss

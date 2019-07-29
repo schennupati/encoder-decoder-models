@@ -1,0 +1,69 @@
+model:
+    encoder: resnet101
+    decoder: fpn
+    input_im_size: 512
+    val_im_size: 1024 
+tasks:
+    seg:
+        classes: 19
+        loss: 'cross_entropy'
+        metric: None
+        target_conversion: 'convert_targets'
+        type: 'double'
+data:
+    dataset: CityScapes
+    transforms:
+        train:
+            input:
+                Resize:
+                    flag: False
+                    size: 512
+                RandomScale: 
+                    flag: True
+                    scale: [0.5, 2.0]        
+                RandomCrop: 
+                    flag: True
+                ColorJitter: 
+                    flag: True
+                    brightness: 0.25
+                    contrast: 0.25
+                    saturation: 0.25 
+                    hue: 0.25
+                ToTensor:
+                    flag: True
+                Normalize:
+                    flag: True
+                    mean: [0.485, 0.456, 0.406]
+                    std:  [0.229, 0.224, 0.225]
+            targets:
+                RandomScale: 
+                    flag: True
+                    scale: [0.5, 2.0]        
+                RandomCrop: 
+                    flag: True
+                ToTensor:
+                    flag: True
+        val:
+            input:
+                Resize:
+                    flag: True
+                    size: 1024
+                ToTensor:
+                    flag: True
+            targets:
+                Resize:
+                    flag: True
+                    size: 1024
+                ToTensor:
+                    flag: True
+training:
+    epochs: 100
+    batch_size: 4
+    n_workers: 8
+    print_interval: 50
+    optimizer:
+        name: 'adam'
+    resume: True
+    early_stop: True
+    patience: True
+

@@ -11,9 +11,8 @@ import numpy as np
 
 
 class runningScore(object):
-    def __init__(self, n_classes,ignore_last = False):
-        if ignore_last:
-            n_classes = n_classes - 1
+    def __init__(self, n_classes):
+
         self.n_classes = n_classes
         self.confusion_matrix = np.zeros((n_classes, n_classes))
 

@@ -9,7 +9,6 @@ import json
 import os
 import random
 import numpy as np
-import cv2
 from collections import namedtuple
 
 from .vision import VisionDataset
@@ -130,7 +129,7 @@ class Cityscapes(VisionDataset):
         if not isinstance(target_type, list):
             self.target_type = [target_type]
 
-        if not all(t in ['instance', 'semantic', 'polygon', 'color'] for t in self.target_type):
+        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity'] for t in self.target_type):
             raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "semantic", "polygon"'
                              ' or "color"')
 
@@ -179,8 +178,16 @@ class Cityscapes(VisionDataset):
             image = self.transform(image)
         
         random.seed(seed) # apply this seed to target tranfsorms
+        n_targets = len(self.target_type)
         if self.target_transform:
-            target = self.target_transform(target)
+            if n_targets == 1:
+                target = self.target_transform(target)
+            else:
+                targets = []
+                for i in range(n_targets):
+                    targets.append(self.target_transform(target[i]))
+                
+                target = targets
 
         return image, target
 
@@ -203,6 +210,8 @@ class Cityscapes(VisionDataset):
             return '{}_labelIds.png'.format(mode)
         elif target_type == 'color':
             return '{}_color.png'.format(mode)
-        else:
+        elif target_type == 'polygon':
             return '{}_polygons.json'.format(mode)
+        elif target_type == 'disparity':
+            return 'disparity.png'
 

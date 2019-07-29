@@ -5,12 +5,15 @@ Created on Wed Jul 24 07:39:01 2019
 
 @author: sumche
 """
+import torchvision.transforms.functional as TF
+import random
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
 from collections import namedtuple
 from tqdm import tqdm
+from PIL import Image
 
 Label = namedtuple( 'Label' , [
 
@@ -108,9 +111,8 @@ cat_labels = [
     Label(  'bus'                  , 15 ,       15 , 'vehicle'         , 7       , True         , False        , (  0, 60,100) ),
     Label(  'train'                , 16 ,       16 , 'vehicle'         , 7       , True         , False        , (  0, 80,100) ),
     Label(  'motorcycle'           , 17 ,       17 , 'vehicle'         , 7       , True         , False        , (  0,  0,230) ),
-    Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) ),
-    Label(  'Dont Care'            , 19 ,       19 , 'vehicle'         , 7       , True         , False        , (0, 0, 0) )
-]
+    Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) )
+    ]
         
 def get_trainId(id,labels=labels):
     for i, label in enumerate(labels):
@@ -125,8 +127,7 @@ def decode_segmap(image, nc=19, labels =labels):
    
   for l in range(0, nc):
     idx = image == l
-    if l == 19:
-        l = 255
+
     l = get_trainId(l)
 
     r[idx] = labels[l].color[ 0]
@@ -146,11 +147,26 @@ def convert_targets(targets,permute=(0,2,3,1),labels=labels):
     
     for label_id in np.unique(targets):
         train_id = labels[int(label_id)].trainId
-        if train_id == 255:
-            train_id = 19
         new_targets[np.where(targets==label_id)] = train_id
     
     return torch.tensor(new_targets)
+
+def convert_targets_disparity(targets,permute=(0,2,3,1)):
+    
+    targets = torch.squeeze((targets).permute(permute)).numpy()
+    mask = targets > 0
+    
+    dep_img = (.22*718)/(targets + (1.0 - mask))
+    mask = (targets > 0)
+    inv_dep = np.reciprocal(dep_img)
+    min_inv_dep = np.min(inv_dep)
+    max_inv_dep = np.max(inv_dep)
+    return torch.tensor((inv_dep-min_inv_dep)/(max_inv_dep-min_inv_dep)).type(torch.float32)
+
+def convert_targets_instance(targets,permute=(0,2,3,1)):
+    
+    return torch.squeeze((targets).permute(permute))
+    
     
 
 def imshow(img):
@@ -217,8 +233,27 @@ def cityscapes_class_weights(num_classes):
     return class_weights
         
 
+class RandomScale(object):
+    def __init__(self, scale, interpolation=Image.BILINEAR):
+        assert isinstance(scale, tuple)
+        self.scale = scale
+        self.interpolation = interpolation
+    
+    def __call__(self, img):
+        """
+        Args:
+            img (PIL Image): Image to be scaled.
 
-class MyJointOp(object):
-    def __call__(self, input, target):
-        # perform something on input and target
-        return input, target
+        Returns:
+            PIL Image: Rescaled image.
+        """
+        return self.random_scale(img)
+    
+    def random_scale(self,image):
+        
+        scale = random.randint(int(self.scale[0]*2),int(self.scale[1]*2))/2.0
+        h,w = int(image.size[-2]*scale),int(image.size[-1]*scale)
+        #print(scale,(w,h))
+        image = TF.resize(image, (w,h),self.interpolation)
+        return image
+
