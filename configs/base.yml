@@ -1,7 +1,7 @@
 model:
-    encoder: resnet101
-    decoder: fpn
-    input_im_size: 512
+    encoder: resnet18
+    decoder: fcn
+    input_im_size: 256
     val_im_size: 1024 
 tasks:
     seg:
@@ -20,9 +20,10 @@ data:
                     size: 512
                 RandomScale: 
                     flag: True
-                    scale: [0.5, 2.0]        
+                    scale: !!python/tuple [0.5, 2.0]        
                 RandomCrop: 
                     flag: True
+                    size: 512
                 ColorJitter: 
                     flag: True
                     brightness: 0.25
@@ -35,12 +36,13 @@ data:
                     flag: True
                     mean: [0.485, 0.456, 0.406]
                     std:  [0.229, 0.224, 0.225]
-            targets:
+            target:
                 RandomScale: 
                     flag: True
-                    scale: [0.5, 2.0]        
+                    scale: !!python/tuple [0.5, 2.0]        
                 RandomCrop: 
                     flag: True
+                    size: 512
                 ToTensor:
                     flag: True
         val:
@@ -50,7 +52,7 @@ data:
                     size: 1024
                 ToTensor:
                     flag: True
-            targets:
+            target:
                 Resize:
                     flag: True
                     size: 1024
@@ -58,7 +60,7 @@ data:
                     flag: True
 training:
     epochs: 100
-    batch_size: 4
+    batch_size: 2
     n_workers: 8
     print_interval: 50
     optimizer:

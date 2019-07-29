@@ -74,7 +74,7 @@ def get_encoder_decoder(encoder_name, decoder_name, tasks = {'seg':19}, pretrain
     decoders = nn.ModuleList()
     
     for task in tasks.keys():
-        decoder = decoder_fn(inplanes, task["classes"])
+        decoder = decoder_fn(inplanes, tasks[task]["classes"])
         decoders.extend([decoder])
     model = Encoder_Decoder(encoder, decoders)
     

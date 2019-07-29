@@ -17,15 +17,16 @@ import numpy as np
 from tqdm import tqdm
 
 import torch
-from torch import nn
 import torch.optim as optim
-from torchvision import transforms
+from torch import nn
 from datasets.cityscapes import Cityscapes
+from torchvision import transforms
 
 from models.encoder_decoder import get_encoder_decoder
 from utils.metrics import runningScore, averageMeter
 from utils.loss import cross_entropy2d
-from utils.im_utils import decode_segmap, convert_targets, cat_labels, imshow, RandomScale 
+from utils.im_utils import decode_segmap, convert_targets, cat_labels, imshow
+from transforms import get_transforms, get_transforms_list 
 
 def train(cfg):
     
@@ -49,7 +50,7 @@ def train(cfg):
     start_iter = 0
     plateau_count = 0
     
-    n_classes = tasks['seg']
+    n_classes = tasks['seg']['classes']
     
     base_dir =  os.path.join(os.path.expanduser('~'),'results')
     if not os.path.exists(base_dir):
@@ -59,31 +60,27 @@ def train(cfg):
                   '-' + str(im_size) + '-' + '_'.join(tasks.keys()))
     time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
     
-    train_transform = transforms.Compose([RandomScale(scale=(0.5,2.0)),transforms.RandomCrop((im_size,2*im_size)),
-                                      transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.25),
-                                      transforms.ToTensor(),
-                                      transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-
-    train_target_transform = transforms.Compose([RandomScale(scale=(0.5,2.0)),transforms.RandomCrop((im_size,2*im_size)),
-                                             transforms.ToTensor()])
+    data_transforms = get_transforms(cfg['data']['transforms'])
     
-    #transforms.Resize(im_size, interpolation=2)
-    #transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
-    #transforms.RandomResizedCrop((im_size,2*im_size),scale=(0.5,2.0))
-    #transforms.RandomCrop((im_size,2*im_size))
-
-    val_transform = transforms.Compose([transforms.Resize(full_res),transforms.ToTensor(),
-                                        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-
-    val_target_transform = transforms.Compose([transforms.Resize(full_res),transforms.ToTensor()])
+    #train_transforms_list = get_transforms_list(cfg['data']['transforms']['train']['input'])
+    #train_transform = transforms.Compose(train_transforms_list)
+    
+    #train_target_transforms_list = get_transforms_list(cfg['data']['transforms']['train']['target'])
+    #train_target_transform = transforms.Compose(train_target_transforms_list)
+    
+    #val_transforms_list = get_transforms_list(cfg['data']['transforms']['val']['input'])
+    #val_transform = transforms.Compose(val_transforms_list)
+    
+    #val_target_transforms_list = get_transforms_list(cfg['data']['transforms']['val']['target'])
+    #val_target_transform = transforms.Compose(val_target_transforms_list)
 
     train_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='train', mode='fine',
-                           target_type=['semantic'],transform=train_transform,
-                           target_transform=train_target_transform)
+                           target_type=['semantic'],transform=data_transforms['train']['input'],
+                           target_transform=data_transforms['train']['target'])
 
     val_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='val', mode='fine',
-                         target_type=['semantic'],transform=val_transform,
-                         target_transform=val_target_transform)
+                         target_type=['semantic'],transform=data_transforms['val']['input'],
+                         target_transform=data_transforms['val']['target'])
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                           batch_size=batch_size,

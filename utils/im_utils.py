@@ -5,15 +5,12 @@ Created on Wed Jul 24 07:39:01 2019
 
 @author: sumche
 """
-import torchvision.transforms.functional as TF
-import random
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
 from collections import namedtuple
 from tqdm import tqdm
-from PIL import Image
 
 Label = namedtuple( 'Label' , [
 
@@ -233,27 +230,5 @@ def cityscapes_class_weights(num_classes):
     return class_weights
         
 
-class RandomScale(object):
-    def __init__(self, scale, interpolation=Image.BILINEAR):
-        assert isinstance(scale, tuple)
-        self.scale = scale
-        self.interpolation = interpolation
-    
-    def __call__(self, img):
-        """
-        Args:
-            img (PIL Image): Image to be scaled.
 
-        Returns:
-            PIL Image: Rescaled image.
-        """
-        return self.random_scale(img)
-    
-    def random_scale(self,image):
-        
-        scale = random.randint(int(self.scale[0]*2),int(self.scale[1]*2))/2.0
-        h,w = int(image.size[-2]*scale),int(image.size[-1]*scale)
-        #print(scale,(w,h))
-        image = TF.resize(image, (w,h),self.interpolation)
-        return image
 
