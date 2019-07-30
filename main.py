@@ -109,20 +109,20 @@ def train(cfg):
                     print("{} loss: {}".format(k, v))
                 train_loss_meter.reset()
                 time_meter.reset()
-            
+                break
         with torch.no_grad():
             for i,data in tqdm(enumerate(dataloaders['val'])):
-                #if i%10 == 9:
-                #    break
+                if i%10 == 9:
+                    break
                 inputs,targets = data 
                 outputs = model(inputs.to(device))
                 
                 outputs = convert_outputs(outputs,cfg['tasks'])
                 targets = convert_targets(targets,cfg['tasks'])
                 
-                val_loss = compute_loss(outputs,targets,cfg['tasks'])
-                pred = outputs.data.max(1)[1].cpu().numpy()
-                gt = rgb_targets.data.cpu().numpy()
+                _,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+                pred = outputs['semantic'].data.max(1)[1].cpu().numpy()
+                gt = targets['semantic'].data.cpu().numpy()
                 running_metrics_val.update(gt, pred)
                 val_loss_meter.update(val_loss.item())
             score, class_iou = running_metrics_val.get_scores()
@@ -142,15 +142,8 @@ def train(cfg):
                          "best_iou": best_iou}
                 save_path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
                 torch.save(state, save_path)
-                print("Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
+                print("\n Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
                 plateau_count = 0
-                imshow(images[0])
-                #om = torch.argmax(outputs[0].squeeze(), dim=1).detach().cpu().numpy()
-                #rgb = decode_segmap(om[0],nc=n_classes)
-                #mask = (gt < n_classes)[0]
-                #mask = np.repeat(np.expand_dims(mask,axis=-1),3,axis=-1)
-                #plt.imshow(rgb*mask)
-                #plt.show()
             else:
                 plateau_count +=1
     
