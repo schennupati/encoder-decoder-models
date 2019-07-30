@@ -1,5 +1,5 @@
 model:
-    encoder: resnet18
+    encoder: resnet34 # resnet 18 and resnet34 are not supported with fpn
     decoder: fcn
     pretrained_path: /home/sumche/results
     im_size: &im_size 256
@@ -11,11 +11,11 @@ tasks:
         loss: 'cross_entropy2d'
         metric: None
         type: 'long'
-    disparity:
-        out_channels: 1
-        loss: 'huber_loss'
-        metric: None
-        type: 'float'
+    #disparity:
+    #    out_channels: 1
+    #    loss: 'mae_loss'
+    #    metric: None
+    #    type: 'float'
         
 data:
     dataset: Cityscapes

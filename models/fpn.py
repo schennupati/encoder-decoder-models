@@ -12,28 +12,31 @@ class _FPNModel(nn.Module):
         self.upsample1_2  = self.upsample(256,256)
         self.upsample1_3  = self.upsample(256,self.out_channels)
         self.bn1          = nn.BatchNorm2d(self.out_channels)
-        self.upsample2_1  = self.upsample(in_planes[0],256)
+        self.upsample2_1  = self.upsample(in_planes[1],256)
         self.upsample2_2  = self.upsample(256,self.out_channels)
         self.bn2          = nn.BatchNorm2d(self.out_channels)
-        self.upsample3_1  = self.upsample(in_planes[0],self.out_channels)
+        self.upsample3_1  = self.upsample(in_planes[2],self.out_channels)
         self.bn3          = nn.BatchNorm2d(self.out_channels)
-        self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[0], self.out_channels, 3,padding=1), nn.ReLU(inplace=True))
+        self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[3], self.out_channels, 3,padding=1), nn.ReLU(inplace=True))
         self.bn4          = nn.BatchNorm2d(self.out_channels)
         self.upsample5    = self.upsample(self.out_channels,self.n_class,1,4,2)
 
     def forward(self, intermediate_result, layers):
+        
+        for layer in layers:
+            print(intermediate_result[layer].size())
     
         # size=(N, 512, x.H/32, x.W/32)
-        feat1 = self.upsample1_3(self.upsample1_2(self.upsample1_1(intermediate_result[layers[-2]])))
+        feat1 = self.upsample1_3(self.upsample1_2(self.upsample1_1(intermediate_result[layers[-1]])))
         feat1 = self.bn1(feat1)
         # size=(N, 512, x.H/16, x.W/16)
-        feat2 = self.upsample2_2(self.upsample2_1(intermediate_result[layers[-3]]))
+        feat2 = self.upsample2_2(self.upsample2_1(intermediate_result[layers[-2]]))
         feat2 = self.bn2(feat2)
         # size=(N, 256, x.H/8, x.W/8)
-        feat3 = self.upsample3_1(intermediate_result[layers[-4]])
+        feat3 = self.upsample3_1(intermediate_result[layers[-3]])
         feat3 = self.bn3(feat3)
         # size=(N, 128, x.H/4, x.W/4)
-        feat4 = self.upsample4(intermediate_result[layers[-5]])
+        feat4 = self.upsample4(intermediate_result[layers[-4]])
         feat4 = self.bn4(feat4)
         score = feat1 + feat2 + feat3 + feat4
         # size=(N, n_class, x.H/1, x.W/1)

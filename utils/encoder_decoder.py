@@ -33,7 +33,8 @@ inplanes_map = {
                           },
                 'vgg':
                       {
-                       'vgg16':[512,512,256]
+                       'vgg16':[512,512,256,128],
+                       'vgg19':[512,512,256,128]
                        }
                 }
     
@@ -46,9 +47,11 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     tasks = cfg['tasks']
     
     if 'resnet' in encoder_name:
+        if encoder_name in ['resnet18','resnet34'] and decoder_name=='fpn':
+            raise ValueError('{} is not supported with fpn'.format(encoder_name))
         if decoder_name == 'fpn':
             encoder    = resnet_fpn_backbone(encoder_name,pretrained=True)
-            inplanes   = [256,256,156]
+            inplanes   = [256,256,256,256]
             decoder_fn = decoder_map['fpn']
             
         elif decoder_name == 'fcn':
@@ -58,14 +61,16 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
             encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
             inplanes = inplanes_map['resnet'][encoder_name]
             decoder_fn = decoder_map['fcn']
-        
+            
     elif 'vgg' in encoder_name:
         encoder = VGGNet(model=encoder_name, requires_grad=True)
         inplanes = inplanes_map['vgg'][encoder_name]
+    
         if decoder_name =='fpn':
             decoder_fn = decoder_map['fpn']
         elif decoder_name =='fcn':
             decoder_fn = decoder_map['fcn']
+        
     decoders = nn.ModuleList()
     
     for task in tasks.keys():

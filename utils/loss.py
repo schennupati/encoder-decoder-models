@@ -87,6 +87,11 @@ def mae_loss(input, target, weight=None, size_average=True):
         input = input.permute(0,2,3,1).squeeze()
     return F.l1_loss(input, target)
 
+def mse_loss(input, target, weight=None, size_average=True):
+    if input.size() !=target.size():
+        input = input.permute(0,2,3,1).squeeze()
+    return F.mse_loss(input, target)
+
     
     
 
