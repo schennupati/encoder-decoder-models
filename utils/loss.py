@@ -10,7 +10,6 @@ Created on Tue Jul 23 19:55:03 2019
 import torch
 import torch.nn.functional as F
 
-
 def cross_entropy2d(input, target, weight=None, size_average=True):
     n, c, h, w = input.size()
     nt, ht, wt = target.size()
@@ -78,8 +77,16 @@ def bootstrapped_cross_entropy2d(input, target, K, weight=None, size_average=Tru
         )
     return loss / float(batch_size)
 
-def huber_loss(input, target, size_average=True):
-    loss = F.smooth_l1_loss(
-        input, target
-    )
-    return loss
+def huber_loss(input, target, weight=None, size_average=True):
+    if input.size() !=target.size():
+        input = input.permute(0,2,3,1).squeeze()
+    return F.smooth_l1_loss(input, target)
+
+def mae_loss(input, target, weight=None, size_average=True):
+    if input.size() !=target.size():
+        input = input.permute(0,2,3,1).squeeze()
+    return F.l1_loss(input, target)
+
+    
+    
+

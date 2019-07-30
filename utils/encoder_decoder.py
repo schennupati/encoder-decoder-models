@@ -69,7 +69,7 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     decoders = nn.ModuleList()
     
     for task in tasks.keys():
-        decoder = decoder_fn(inplanes, tasks[task]["classes"])
+        decoder = decoder_fn(inplanes, tasks[task]["out_channels"])
         decoders.extend([decoder])
     model = Encoder_Decoder(encoder, decoders)
     

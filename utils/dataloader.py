@@ -8,29 +8,11 @@ Created on Mon Jul 29 20:10:15 2019
 import torch
 
 from datasets.cityscapes import Cityscapes
-from transforms import get_transforms
+from .transforms import get_transforms
 
 
 dataset_map = {'Cityscapes': (Cityscapes)}
-'''
-train_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='train', mode='fine',
-                           target_type=['semantic'],transform=transforms['train']['input'],
-                           target_transform=transforms['train']['target'])
-
-val_dataset = Cityscapes('/home/sumche/datasets/Cityscapes', split='val', mode='fine',
-                         target_type=['semantic'],transform=transforms['val']['input'],
-                         target_transform=transforms['val']['target'])
-
-train_loader = torch.utils.data.DataLoader(train_dataset,
-                                          batch_size=batch_size,
-                                          shuffle=True,
-                                          num_workers=8)
-
-val_loader = torch.utils.data.DataLoader(val_dataset,
-                                          batch_size=batch_size,
-                                          shuffle=True,
-                                          num_workers=8)
-''' 
+ 
 def get_dataset(cfg,split='train',mode='fine',target_type='semantic',transforms=None):
      
      dataset_fn = dataset_map[cfg['dataset']]
