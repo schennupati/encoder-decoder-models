@@ -1,17 +1,18 @@
 model:
-    encoder: resnet18
-    decoder: fcn
-    input_im_size: 256
-    val_im_size: 1024 
+    encoder: resnet101
+    decoder: fpn
+
 tasks:
-    seg:
+    semantic:
         classes: 19
         loss: 'cross_entropy'
         metric: None
         target_conversion: 'convert_targets'
         type: 'double'
+        
 data:
-    dataset: CityScapes
+    dataset: Cityscapes
+    root_path: /home/sumche/datasets/Cityscapes
     transforms:
         train:
             input:
@@ -58,14 +59,21 @@ data:
                     size: 1024
                 ToTensor:
                     flag: True
-training:
-    epochs: 100
-    batch_size: 2
-    n_workers: 8
-    print_interval: 50
-    optimizer:
-        name: 'adam'
-    resume: True
-    early_stop: True
-    patience: True
+                    
+params:
+    train:
+        epochs: 100
+        batch_size: 2
+        shuffle: True
+        n_workers: 8
+        print_interval: 50
+        optimizer:
+            name: 'adam'
+        resume: True
+        early_stop: True
+        patience: True
+    val:
+        batch_size: 4
+        shuffle: False
+        n_workers: 8
 

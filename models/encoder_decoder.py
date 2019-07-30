@@ -5,19 +5,10 @@ Created on Thu Jul 25 20:00:48 2019
 
 @author: sumche
 """
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jul 19 08:32:02 2019
-
-@author: sumche
-"""
-
-#TODO: Update code to use Semantic FPN ---> DONE 
 #TODO: Update to use VGG, DenseNet etc  
 #TODO: Update to use PSPNet, DeepLabV3 etc as decoders
 #TODO: Implement multi-task feature.
+
 from collections import OrderedDict
 
 from torch import nn
@@ -48,7 +39,11 @@ inplanes_map = {
     
 decoder_map = {'fcn': (FCN),'fpn':(FPN)}
 
-def get_encoder_decoder(encoder_name, decoder_name, tasks = {'seg':19}, pretrained_backbone=True):
+def get_encoder_decoder(cfg, pretrained_backbone=True):
+    
+    encoder_name = cfg['model']['encoder']
+    decoder_name = cfg['model']['decoder']
+    tasks = cfg['tasks']
     
     if 'resnet' in encoder_name:
         if decoder_name == 'fpn':
