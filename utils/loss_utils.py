@@ -39,3 +39,41 @@ def compute_loss(predictions,targets,cfg,device,weights=None):
         out_loss += loss
         
     return losses,out_loss
+
+class averageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+class loss_meters:
+    def __init__(self,cfg):
+        self.cfg = cfg    
+        self.meters = self.get_loss_meters()
+        
+    def get_loss_meters(self):
+        meters = {}
+        for task in self.cfg.keys():
+            meters[task] = averageMeter()
+        return meters
+    
+    def update(self,losses):
+        for task in self.cfg.keys():
+            self.meters[task].update(losses[task])
+    
+    def reset(self):
+        for task in self.cfg.keys():
+            self.meters[task].reset()
+    

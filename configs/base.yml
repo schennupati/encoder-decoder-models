@@ -1,25 +1,26 @@
 model:
-    encoder: resnet34 # resnet 18 and resnet34 are not supported with fpn
+    encoder: resnet18 # resnet 18 and resnet34 are not supported with fpn
     decoder: fcn
     pretrained_path: /home/sumche/results
-    im_size: &im_size 256
-    val_im_size: &val_im_size 1024
 
 tasks:
     semantic:
         out_channels: 19
         loss: 'cross_entropy2d'
-        metric: None
         type: 'long'
-    #disparity:
-    #    out_channels: 1
-    #    loss: 'mae_loss'
-    #    metric: None
-    #    type: 'float'
+        metric: None
+    disparity:
+        out_channels: 1
+        loss: 'mae_loss'
+        type: 'float'
+        metric: None
         
 data:
     dataset: Cityscapes
     root_path: /home/sumche/datasets/Cityscapes
+    im_size: &im_size 256
+    random_scaling: &random_scaling !!python/tuple [0.5, 1.0]
+    val_im_size: &val_im_size 1024
     transforms:
         train:
             input:
@@ -28,7 +29,7 @@ data:
                     size: *im_size
                 RandomScale: 
                     flag: False
-                    scale: !!python/tuple [0.5, 1.0]        
+                    scale: *random_scaling        
                 RandomCrop: 
                     flag: False
                     size: *im_size
@@ -50,7 +51,7 @@ data:
                     size: *im_size
                 RandomScale: 
                     flag: False
-                    scale: !!python/tuple [0.5, 2.0]        
+                    scale: *random_scaling        
                 RandomCrop: 
                     flag: False
                     size: *im_size
@@ -71,20 +72,22 @@ data:
                     flag: True
                     
 params:
+    batchsize: &batch_size 8
+    n_workers: &n_workers 8
     train:
         epochs: 100
-        batch_size: 2
+        batch_size: *batch_size
         shuffle: True
-        n_workers: 8
-        print_interval: 5
+        n_workers: *n_workers
+        print_interval: 50
         optimizer:
             name: 'adam'
             lr: 1.0e-4
         resume: True
         early_stop: True
-        patience: True
+        patience: 25
     val:
         batch_size: 4
         shuffle: False
-        n_workers: 8
+        n_workers: *n_workers
 

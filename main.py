@@ -17,10 +17,10 @@ from torch import nn
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
-from utils.metrics import runningScore, averageMeter
 from utils.preprocess import convert_targets, convert_outputs, get_weights
-from utils.loss_utils import compute_loss
-from utils.im_utils import get_imsize, cat_labels, imshow
+from utils.metrics import runningScore
+from utils.loss_utils import compute_loss, loss_meters
+from utils.im_utils import cat_labels, imshow
 from utils.dataloader import get_dataloaders 
 from utils.checkpoint_loader import get_checkpoint
 
@@ -35,6 +35,7 @@ def train(cfg):
     decoder_name = cfg["model"]["decoder"]
     base_dir = cfg["model"]["pretrained_path"]
     num_classes = cfg['tasks']['semantic']['out_channels']
+    imsize  = cfg['data']['im_size']
     train_params = cfg['params']['train']        
     epochs = train_params["epochs"]
     resume_training = train_params["resume"]
@@ -44,7 +45,7 @@ def train(cfg):
     best_iou = -100.0
     start_iter = 0
     plateau_count = 0
-    imsize  = get_imsize(cfg)
+    
     weights = get_weights(cfg)
     
     ###### Define Experiment save path ######
@@ -52,7 +53,7 @@ def train(cfg):
         base_dir =  os.path.join(os.path.expanduser('~'),'results')
     if not os.path.exists(base_dir):
         os.makedirs(base_dir)
-    exp_name  =  (encoder_name + '-' + str(decoder_name) +
+    exp_name  =  (encoder_name + '-' + decoder_name +
                   '-' + str(imsize) + '-' + '_'.join(cfg['tasks'].keys()))
     time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')  
     
@@ -67,9 +68,8 @@ def train(cfg):
     optimizer_params = {k: v for k, v in train_params["optimizer"].items() if k != "name"}      
     optimizer = optimizer_cls(model.parameters(), **optimizer_params)
     
-    train_loss_meter = averageMeter()
-    val_loss_meter   = averageMeter()
-    time_meter       = averageMeter()
+    train_loss_meters = loss_meters(cfg['tasks'])
+    val_loss_meters   = loss_meters(cfg['tasks'])
     running_metrics_val = runningScore(num_classes)    
     
     ###### load pre trained models ######
@@ -85,9 +85,9 @@ def train(cfg):
         print("Begining Training from Scratch")    
             
     for epoch in range(epochs):
-        print('********************** '+str(epoch+1)+' **********************')
+        print('********************** Epoch {} **********************'.format(epoch+1))
+        print('********************** Training *********************')
         for i, data in tqdm(enumerate(dataloaders['train'])):
-            t = time.time()
             optimizer.zero_grad()
             
             inputs,targets = data 
@@ -99,32 +99,29 @@ def train(cfg):
             losses,loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
             loss.backward()
             optimizer.step()
-            time_meter.update(time.time() - t)        
-            train_loss_meter.update(loss.item())
-            if i % print_interval == print_interval - 1:        
-                print('epoch: %d batch: %d time_per_batch: %.3f  loss: %.3f' %
-                          (epoch + 1, i + 1, time_meter.avg , train_loss_meter.avg))
-                
-                for k, v in losses.items():
-                    print("{} loss: {}".format(k, v))
-                train_loss_meter.reset()
-                time_meter.reset()
-                break
+            train_loss_meters.update(losses)
+            if i % print_interval == print_interval - 1:
+                print("\nepoch: {} batch: {}".format(epoch + 1, i + 1))
+                for k, v in train_loss_meters.meters.items():
+                    print("{} loss: {}".format(k, v.avg))
+                train_loss_meters.reset()
+                #break
         with torch.no_grad():
+            print('\n********************* validation ********************')
             for i,data in tqdm(enumerate(dataloaders['val'])):
-                if i%10 == 9:
-                    break
+                #if i%10 == 9:
+                #    break
                 inputs,targets = data 
                 outputs = model(inputs.to(device))
                 
                 outputs = convert_outputs(outputs,cfg['tasks'])
                 targets = convert_targets(targets,cfg['tasks'])
                 
-                _,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+                val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
                 pred = outputs['semantic'].data.max(1)[1].cpu().numpy()
                 gt = targets['semantic'].data.cpu().numpy()
                 running_metrics_val.update(gt, pred)
-                val_loss_meter.update(val_loss.item())
+                val_loss_meters.update(val_losses)
             score, class_iou = running_metrics_val.get_scores()
             
             for k,v in score.items():
@@ -133,7 +130,7 @@ def train(cfg):
                 print(cat_labels[k].name,': ',v)
             
             running_metrics_val.reset()
-            val_loss_meter.reset()
+            val_loss_meters.reset()
             if score["Mean IoU : \t"] >= best_iou:
                 best_iou = score["Mean IoU : \t"]
                 state = {"epoch": start_iter + epoch + 1,
@@ -142,7 +139,7 @@ def train(cfg):
                          "best_iou": best_iou}
                 save_path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
                 torch.save(state, save_path)
-                print("\n Saving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
+                print("\nSaving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
                 plateau_count = 0
             else:
                 plateau_count +=1

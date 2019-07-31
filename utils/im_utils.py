@@ -129,12 +129,6 @@ def decode_segmap(image, nc=19, labels =labels):
      
   rgb = np.stack([r, g, b], axis=2)
   return rgb
-    
-def get_imsize(cfg):
-    cfg = cfg['data']['transforms']['train']['input']
-    for key in cfg.keys():
-        if key in ['Resize','RandomCrop'] and cfg[key]['flag']:
-            return cfg[key]['size']
 
 def imshow(img):
     img = img / 2 + 0.5     # unnormalize
