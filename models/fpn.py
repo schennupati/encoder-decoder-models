@@ -4,7 +4,7 @@ from torch import nn
 
 class _FPNModel(nn.Module):
 
-    def __init__(self, in_planes =[2048,1024,512], n_class =21):
+    def __init__(self, in_planes =[2048,1024,512], n_class =19):
         super().__init__()
         self.n_class = n_class
         self.out_channels = 128
@@ -15,7 +15,7 @@ class _FPNModel(nn.Module):
         self.upsample2_1  = self.upsample(in_planes[1],256)
         self.upsample2_2  = self.upsample(256,self.out_channels)
         self.bn2          = nn.BatchNorm2d(self.out_channels)
-        self.upsample3_1  = self.upsample(in_planes[2],self.out_channels)
+        self.upsample3    = self.upsample(in_planes[2],self.out_channels)
         self.bn3          = nn.BatchNorm2d(self.out_channels)
         self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[3], self.out_channels, 3,padding=1), nn.ReLU(inplace=True))
         self.bn4          = nn.BatchNorm2d(self.out_channels)
@@ -23,17 +23,21 @@ class _FPNModel(nn.Module):
 
     def forward(self, intermediate_result, layers):
         
-        for layer in layers:
-            print(intermediate_result[layer].size())
+        #for layer in layers:
+        #    print(intermediate_result[layer].size())
     
         # size=(N, 512, x.H/32, x.W/32)
+        #feat1_1 = self.upsample1_1(intermediate_result[layers[-2]])
+        #feat1_2 = self.upsample1_2(feat1_1)
+        #feat1_3 = self.upsample1_1(feat1_2)
+        #feat1 = self.bn1(feat1_3)
         feat1 = self.upsample1_3(self.upsample1_2(self.upsample1_1(intermediate_result[layers[-1]])))
         feat1 = self.bn1(feat1)
         # size=(N, 512, x.H/16, x.W/16)
         feat2 = self.upsample2_2(self.upsample2_1(intermediate_result[layers[-2]]))
         feat2 = self.bn2(feat2)
         # size=(N, 256, x.H/8, x.W/8)
-        feat3 = self.upsample3_1(intermediate_result[layers[-3]])
+        feat3 = self.upsample3(intermediate_result[layers[-3]])
         feat3 = self.bn3(feat3)
         # size=(N, 128, x.H/4, x.W/4)
         feat4 = self.upsample4(intermediate_result[layers[-4]])
@@ -41,6 +45,7 @@ class _FPNModel(nn.Module):
         score = feat1 + feat2 + feat3 + feat4
         # size=(N, n_class, x.H/1, x.W/1)
         score = self.upsample5(score)
+        #print(score.size())
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
     

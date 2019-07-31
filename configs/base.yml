@@ -1,26 +1,28 @@
 model:
-    encoder: resnet18 # resnet 18 and resnet34 are not supported with fpn
-    decoder: fcn
+    encoder: resnet50 # resnet 18 and resnet34 are not supported with fpn
+    decoder: fpn
     pretrained_path: /home/sumche/results
 
 tasks:
     semantic:
         out_channels: 19
-        loss: 'cross_entropy2d'
-        type: 'long'
-        metric: None
+        loss: cross_entropy2d
+        type: long
+        metric: classification_metrics
+        postproc: argmax
     disparity:
         out_channels: 1
-        loss: 'mae_loss'
-        type: 'float'
-        metric: None
+        loss: mae_loss
+        type: float
+        metric: regression_metrics
+        postproc: None
         
 data:
     dataset: Cityscapes
     root_path: /home/sumche/datasets/Cityscapes
     im_size: &im_size 256
     random_scaling: &random_scaling !!python/tuple [0.5, 1.0]
-    val_im_size: &val_im_size 1024
+    val_im_size: &val_im_size 256
     transforms:
         train:
             input:
@@ -72,7 +74,7 @@ data:
                     flag: True
                     
 params:
-    batchsize: &batch_size 8
+    batchsize: &batch_size 2
     n_workers: &n_workers 8
     print_interval: 50
     resume: True
@@ -84,7 +86,7 @@ params:
         shuffle: True
         n_workers: *n_workers
         optimizer:
-            name: 'adam'
+            name: adam
             lr: 1.0e-4
     val:
         batch_size: 4

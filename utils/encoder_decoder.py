@@ -33,10 +33,10 @@ inplanes_map = {
                           },
                 'vgg':
                       {
-                       'vgg16':[512,512,256,128],
-                       'vgg19':[512,512,256,128]
+                       'vgg16':[512,512,256,128],'vgg19':[512,512,256,128]
                        }
                 }
+                      
     
 decoder_map = {'fcn': (FCN),'fpn':(FPN)}
 
@@ -76,22 +76,26 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     for task in tasks.keys():
         decoder = decoder_fn(inplanes, tasks[task]["out_channels"])
         decoders.extend([decoder])
-    model = Encoder_Decoder(encoder, decoders)
+    model = Encoder_Decoder(encoder, decoders, cfg['model'])
     
     return model
 
 
 class _Encoder_Decoder(nn.Module):
 
-    def __init__(self, encoder, decoders):
+    def __init__(self, encoder, decoders, cfg):
         super().__init__()
         self.encoder = encoder
         self.decoders = decoders
+        self.cfg = cfg
 
     def forward(self, x):
         output = self.encoder(x)
+        encoder= self.cfg['encoder']
+        decoder= self.cfg['decoder']
         intermediate_result = OrderedDict()
         layers = [k for k,_ in output.items()]
+        layers = layers[:-1] if 'resnet' in encoder and 'fpn' in decoder else layers
         for layer in layers:
             intermediate_result[layer] = output[layer]
         outputs = []

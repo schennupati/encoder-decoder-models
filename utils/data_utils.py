@@ -28,16 +28,17 @@ def convert_targets_semantic(targets,permute=(0,2,3,1),labels=labels):
 def convert_targets_disparity(targets,permute=(0,2,3,1)):
     
     targets = torch.squeeze((targets).permute(permute)).numpy()
-    mask = targets > 0
-    dep_img = (.22*718)/(targets + (1.0 - mask))
-    inv_dep = np.reciprocal(dep_img)
-    min_inv_dep = np.min(inv_dep)
-    max_inv_dep = np.max(inv_dep)
+    targets[targets>0] = (targets[targets>0]-1)/256
+    #mask = targets > 0
+    inv_dep_img = targets/(0.209313*2262.52)
+    #inv_dep = np.reciprocal(inv_dep_img)
+    #min_inv_dep = np.min(inv_dep)
+    #max_inv_dep = np.max(inv_dep)
     
-    normalized_dep = (inv_dep-min_inv_dep)/(max_inv_dep-min_inv_dep)
+    #normalized_dep = (inv_dep-min_inv_dep)/(max_inv_dep-min_inv_dep)
     #img_dep = np.repeat(np.expand_dims(normalized_dep[0],axis=-1),3,axis=-1)
     
-    return torch.tensor(normalized_dep).type(torch.float32)
+    return torch.tensor(inv_dep_img).type(torch.float32)
 
 def convert_targets_instance(targets,permute=(0,2,3,1)):
     return torch.squeeze((targets).permute(permute))
@@ -79,6 +80,17 @@ def convert_outputs(outputs,cfg):
     converted_outputs = {}
     for i,task in enumerate(cfg.keys()):
         converted_outputs[task] = outputs[i]
+    return converted_outputs
+
+def post_process_outputs(outputs,cfg):
+    #cfg['tasks']
+    #input: converted outputs
+    converted_outputs = {}
+    for task in outputs.keys():
+        if cfg[task]['postproc'] == 'argmax':
+            converted_outputs[task] = torch.argmax(outputs[task],dim=1)
+        else:
+            converted_outputs[task] = outputs[task]
     return converted_outputs
 
 def get_class_weights_from_data(loader,num_classes):

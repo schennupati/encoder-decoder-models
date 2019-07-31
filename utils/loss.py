@@ -12,9 +12,14 @@ import torch.nn.functional as F
 
 def cross_entropy2d(input, target, weight=None, size_average=True):
     n, c, h, w = input.size()
-    nt, ht, wt = target.size()
+    if len(target.size())==2 and n==1:
+        ht, wt = target.size()
+    elif len(target.size())==3 and n>1:
+        nt, ht, wt = target.size()
+    else:
+        raise ValueError('Check size of inputs and targets')
 
-    # Handle inconsistent size between input and target
+    #Handle inconsistent size between input and target
     if h != ht and w != wt:  # upsample labels
         input = F.interpolate(input, size=(ht, wt), mode="bilinear", align_corners=True)
 

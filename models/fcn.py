@@ -4,7 +4,7 @@ from torch import nn
 
 class _FCNModel(nn.Module):
 
-    def __init__(self, in_planes =[2048,1024,512], n_class =21):
+    def __init__(self, in_planes =[2048,1024,512], n_class =19):
         super().__init__()
         
         self.n_class = n_class
@@ -27,7 +27,8 @@ class _FCNModel(nn.Module):
         
     def forward(self, intermediate_result, layers):
         
-        
+        #for layer in layers:
+        #    print(intermediate_result[layer].size())
         # size=(N, 512, x.H/32, x.W/32)
         feat1 = self.feat1(intermediate_result[layers[-1]])
         score = self.bn1(self.relu(self.deconv1(feat1)))
@@ -59,8 +60,9 @@ class _FCNModel(nn.Module):
         score = self.bn5(self.relu(self.deconv5(score)))
         score = self.classifier(score)
         # size=(N, n_class, x.H, x.W)
-        
+        #print(score.size())
         return score  # size=(N, n_class, x.H/1, x.W/1)
+        
 
 class FCN(_FCNModel):
     """

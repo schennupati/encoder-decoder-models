@@ -16,9 +16,9 @@ from torch import nn
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
-from utils.preprocess import convert_targets, convert_outputs, get_weights
-from utils.metrics import runningScore
-from utils.loss_utils import compute_loss, loss_meters
+from utils.data_utils import convert_targets, convert_outputs, post_process_outputs, get_weights
+from utils.metrics import metrics
+from utils.loss_utils import compute_loss, loss_meters, averageMeter
 from utils.im_utils import cat_labels, imshow
 from utils.dataloader import get_dataloaders 
 from utils.checkpoint_loader import get_checkpoint
@@ -33,7 +33,6 @@ def train(cfg):
     encoder_name = cfg["model"]["encoder"]
     decoder_name = cfg["model"]["decoder"]
     base_dir = cfg["model"]["pretrained_path"]
-    num_classes = cfg['tasks']['semantic']['out_channels']
     imsize  = cfg['data']['im_size']
     params = cfg['params']        
     epochs = params["epochs"]
@@ -41,10 +40,9 @@ def train(cfg):
     patience = params["patience"]
     early_stop = params["early_stop"]
     print_interval = params['print_interval']
-    best_iou = -100.0
+    best_loss = 1e10
     start_iter = 0
     plateau_count = 0
-    
     weights = get_weights(cfg)
     
     ###### Define Experiment save path ######
@@ -69,7 +67,7 @@ def train(cfg):
     
     train_loss_meters = loss_meters(cfg['tasks'])
     val_loss_meters   = loss_meters(cfg['tasks'])
-    running_metrics_val = runningScore(num_classes)    
+    val_metrics = metrics(cfg['tasks'])    
     
     ###### load pre trained models ######
     if resume_training and get_checkpoint(exp_name,base_dir) is not None:
@@ -77,8 +75,8 @@ def train(cfg):
         model.load_state_dict(checkpoint["model_state"])
         optimizer.load_state_dict(checkpoint["optimizer_state"])
         start_iter = checkpoint["epoch"]
-        best_iou = checkpoint['best_iou']
-        print("Loaded checkpoint '{}' from epoch {} with mIoU {}".format(checkpoint_name, start_iter, best_iou))
+        best_loss = checkpoint['best_loss']
+        print("Loaded checkpoint '{}' from epoch {} with loss {}".format(checkpoint_name, start_iter, best_loss))
         
     else:
         print("Begining Training from Scratch")    
@@ -86,6 +84,7 @@ def train(cfg):
     for epoch in range(epochs):
         print('\n********************** Epoch {} **********************'.format(epoch+1))
         print('********************** Training *********************')
+        running_loss = averageMeter()
         for i, data in tqdm(enumerate(dataloaders['train'])):
             optimizer.zero_grad()
             
@@ -96,15 +95,19 @@ def train(cfg):
             targets = convert_targets(targets,cfg['tasks'])
             
             losses,loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+            running_loss.update(loss)
             loss.backward()
             optimizer.step()
             train_loss_meters.update(losses)
             if i % print_interval == print_interval - 1 or i == len(dataloaders['train'])-1:
-                print("\nepoch: {} batch: {}".format(epoch + 1, i + 1))
+                print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, i + 1, running_loss.avg))
                 for k, v in train_loss_meters.meters.items():
                     print("{} loss: {}".format(k, v.avg))
+                #break
+            running_loss.reset()
             train_loss_meters.reset()
         with torch.no_grad():
+            running_val_loss = averageMeter()
             print('\n********************* validation ********************')
             for i,data in tqdm(enumerate(dataloaders['val'])):
                 #if i%10 == 9:
@@ -112,42 +115,45 @@ def train(cfg):
                 inputs,targets = data 
                 outputs = model(inputs.to(device))
                 
-                outputs = convert_outputs(outputs,cfg['tasks'])
-                targets = convert_targets(targets,cfg['tasks'])
+                outputs     = convert_outputs(outputs,cfg['tasks'])
+                predictions = post_process_outputs(outputs,cfg['tasks'])
+                targets     = convert_targets(targets,cfg['tasks'])
                 
                 val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
                 val_loss_meters.update(val_losses)
-                if i % print_interval == print_interval - 1 or i == len(dataloaders['val'])-1:
-                    print("\nbatch: {}".format( i + 1))
-                    for k, v in val_loss_meters.meters.items():
-                        print("{} loss: {}".format(k, v.avg))
-                val_loss_meters.reset()
-                
-                pred = outputs['semantic'].data.max(1)[1].cpu().numpy()
-                gt = targets['semantic'].data.cpu().numpy()
-                running_metrics_val.update(gt, pred)
-            score, class_iou = running_metrics_val.get_scores()
-            print('\n********************** Metrics *********************')
-            for k,v in score.items():
-                print(k,v)
-            for k,v in class_iou.items():
-                print(cat_labels[k].name,': ',v)
-            
-            running_metrics_val.reset()
+                running_val_loss.update(val_loss)
+            print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
+            for k, v in val_loss_meters.meters.items():
+                print("{} loss: {}".format(k, v.avg))
+            current_loss = running_val_loss.avg
+            running_val_loss.reset()
             val_loss_meters.reset()
-            if score["Mean IoU : \t"] >= best_iou:
-                best_iou = score["Mean IoU : \t"]
+            val_metrics.update(targets, predictions)
+            
+            print('\n********************** Metrics *********************')
+            for task in val_metrics.metrics.keys():
+                if val_metrics.metrics[task] is not None:
+                    score, class_iou = val_metrics.metrics[task].get_scores()
+                    print('********************** {} *********************'.format(task))
+                    if isinstance(score,dict):
+                        [print(k,'\t :',v) for k,v in score.items() ]
+                    if task =='semantic':
+                        [print(cat_labels[k].name,'\t :',v) for k,v in class_iou.items() ]
+                        
+            val_metrics.reset()
+            if current_loss <= best_loss:
+                best_loss = current_loss
                 state = {"epoch": start_iter + epoch + 1,
                          "model_state": model.state_dict(),
                          "optimizer_state": optimizer.state_dict(),
-                         "best_iou": best_iou}
+                         "best_loss": best_loss}
                 save_path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
                 torch.save(state, save_path)
                 print("\nSaving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
                 plateau_count = 0
             else:
                 plateau_count +=1
-    
+            
     if plateau_count == patience and early_stop:
         print('Early Stopping after {} epochs: Patience of {} epochs reached.'.format(epoch+1,plateau_count))
         print('Best Checkpoint:')

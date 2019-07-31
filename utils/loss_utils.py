@@ -5,6 +5,7 @@ Created on Tue Jul 30 13:40:49 2019
 
 @author: sumche
 """
+#TODO:Implement MTL loss combinations
 from utils.loss import (cross_entropy2d,bootstrapped_cross_entropy2d,
                         multi_scale_cross_entropy2d,huber_loss,mae_loss,mse_loss)
 
