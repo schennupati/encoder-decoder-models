@@ -6,7 +6,6 @@ Created on Fri Jul 19 07:59:23 2019
 @author: sumche
 """
 import argparse
-import time
 import os
 import datetime
 import yaml
@@ -100,7 +99,7 @@ def train(cfg):
             loss.backward()
             optimizer.step()
             train_loss_meters.update(losses)
-            if i % print_interval == print_interval - 1:
+            if i % print_interval == print_interval - 1 or i == len(dataloaders['train']):
                 print("\nepoch: {} batch: {}".format(epoch + 1, i + 1))
                 for k, v in train_loss_meters.meters.items():
                     print("{} loss: {}".format(k, v.avg))
@@ -119,7 +118,7 @@ def train(cfg):
                 
                 val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
                 val_loss_meters.update(val_losses)
-                if i % print_interval == print_interval - 1:
+                if i % print_interval == print_interval - 1 or i == len(dataloaders['val']):
                     print("\nbatch: {}".format( i + 1))
                     for k, v in val_loss_meters.meters.items():
                         print("{} loss: {}".format(k, v.avg))
