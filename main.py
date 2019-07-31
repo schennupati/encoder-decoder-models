@@ -36,12 +36,12 @@ def train(cfg):
     base_dir = cfg["model"]["pretrained_path"]
     num_classes = cfg['tasks']['semantic']['out_channels']
     imsize  = cfg['data']['im_size']
-    train_params = cfg['params']['train']        
-    epochs = train_params["epochs"]
-    resume_training = train_params["resume"]
-    patience = train_params["patience"]
-    early_stop = train_params["early_stop"]
-    print_interval = train_params['print_interval']
+    params = cfg['params']        
+    epochs = params["epochs"]
+    resume_training = params["resume"]
+    patience = params["patience"]
+    early_stop = params["early_stop"]
+    print_interval = params['print_interval']
     best_iou = -100.0
     start_iter = 0
     plateau_count = 0
@@ -64,8 +64,8 @@ def train(cfg):
     if len(gpus) > 1:
         model = nn.DataParallel(model, device_ids=gpus, dim=0)
         
-    optimizer_cls = get_optimizer(train_params)
-    optimizer_params = {k: v for k, v in train_params["optimizer"].items() if k != "name"}      
+    optimizer_cls = get_optimizer(params['train'])
+    optimizer_params = {k: v for k, v in params['train']["optimizer"].items() if k != "name"}      
     optimizer = optimizer_cls(model.parameters(), **optimizer_params)
     
     train_loss_meters = loss_meters(cfg['tasks'])
@@ -85,7 +85,7 @@ def train(cfg):
         print("Begining Training from Scratch")    
             
     for epoch in range(epochs):
-        print('********************** Epoch {} **********************'.format(epoch+1))
+        print('\n********************** Epoch {} **********************'.format(epoch+1))
         print('********************** Training *********************')
         for i, data in tqdm(enumerate(dataloaders['train'])):
             optimizer.zero_grad()
@@ -107,7 +107,7 @@ def train(cfg):
                 train_loss_meters.reset()
                 #break
         with torch.no_grad():
-            print('\n********************* validation ********************')
+            print('\n\n********************* validation ********************')
             for i,data in tqdm(enumerate(dataloaders['val'])):
                 #if i%10 == 9:
                 #    break
@@ -118,10 +118,16 @@ def train(cfg):
                 targets = convert_targets(targets,cfg['tasks'])
                 
                 val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+                val_loss_meters.update(val_losses)
+                if i % print_interval == print_interval - 1:
+                    print("\nbatch: {}".format( i + 1))
+                    for k, v in val_loss_meters.meters.items():
+                        print("{} loss: {}".format(k, v.avg))
+                    val_loss_meters.reset()
+                
                 pred = outputs['semantic'].data.max(1)[1].cpu().numpy()
                 gt = targets['semantic'].data.cpu().numpy()
                 running_metrics_val.update(gt, pred)
-                val_loss_meters.update(val_losses)
             score, class_iou = running_metrics_val.get_scores()
             
             for k,v in score.items():

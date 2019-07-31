@@ -74,18 +74,18 @@ data:
 params:
     batchsize: &batch_size 8
     n_workers: &n_workers 8
+    print_interval: 50
+    resume: True
+    early_stop: True
+    patience: 25
+    epochs: 100
     train:
-        epochs: 100
         batch_size: *batch_size
         shuffle: True
         n_workers: *n_workers
-        print_interval: 50
         optimizer:
             name: 'adam'
             lr: 1.0e-4
-        resume: True
-        early_stop: True
-        patience: 25
     val:
         batch_size: 4
         shuffle: False
