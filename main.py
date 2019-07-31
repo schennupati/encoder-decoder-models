@@ -103,10 +103,9 @@ def train(cfg):
                 print("\nepoch: {} batch: {}".format(epoch + 1, i + 1))
                 for k, v in train_loss_meters.meters.items():
                     print("{} loss: {}".format(k, v.avg))
-                train_loss_meters.reset()
-                #break
+            train_loss_meters.reset()
         with torch.no_grad():
-            print('\n\n********************* validation ********************')
+            print('\n********************* validation ********************')
             for i,data in tqdm(enumerate(dataloaders['val'])):
                 #if i%10 == 9:
                 #    break
@@ -122,13 +121,13 @@ def train(cfg):
                     print("\nbatch: {}".format( i + 1))
                     for k, v in val_loss_meters.meters.items():
                         print("{} loss: {}".format(k, v.avg))
-                    val_loss_meters.reset()
+                val_loss_meters.reset()
                 
                 pred = outputs['semantic'].data.max(1)[1].cpu().numpy()
                 gt = targets['semantic'].data.cpu().numpy()
                 running_metrics_val.update(gt, pred)
             score, class_iou = running_metrics_val.get_scores()
-            
+            print('\n********************** Metrics *********************')
             for k,v in score.items():
                 print(k,v)
             for k,v in class_iou.items():
