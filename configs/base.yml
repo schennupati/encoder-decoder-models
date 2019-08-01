@@ -1,6 +1,8 @@
 model:
     encoder: resnet50 # resnet 18 and resnet34 are not supported with fpn
     decoder: fpn
+    cross_stitch:
+        flag: True
     pretrained_path: /home/sumche/results
 
 tasks:
