@@ -200,6 +200,12 @@ class _cross_stitch_layer(nn.Module):
         if n_tasks == 1:
             raise ValueError('Cross Stitch is applied on atleast 2 tasks')
         else:
+            eye   = torch.eye(n_tasks)
+            ones  = eye == 1
+            zeros = eye == 0
+            eye[ones]  = 1.0
+            eye[zeros] = -1.0
+            #eye = torch.sigmoid(eye)
             self.cross_stitch = nn.Parameter(torch.randn(n_tasks,n_tasks))#,device=device))
         self.cross_stitch.requiresGrad = True
         
