@@ -7,7 +7,7 @@ from torchvision import models
 
 class VGGNet(VGG):
     def __init__(self, pretrained=True, model='vgg16', requires_grad=True, remove_fc=True, show_params=False):
-        super().__init__(make_layers(cfg[model]))
+        super().__init__(make_layers(cfg[model],True))
         self.ranges = ranges[model]
 
         if pretrained:

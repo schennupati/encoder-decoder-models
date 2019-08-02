@@ -58,7 +58,7 @@ class _FPNModel(nn.Module):
         layers.append(nn.ReLU(inplace=True))
         
         return nn.Sequential(*layers)
-
+    
 class FPN(_FPNModel):
     """
     Implements a Fully-Convolutional Network for semantic segmentation.

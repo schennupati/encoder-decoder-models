@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import torch
 from torch import nn
+from torchviz import make_dot
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
@@ -56,7 +57,7 @@ def train(cfg):
     
     ###### Define dataloaders, model, optimizers and metrics######
     dataloaders = get_dataloaders(cfg)
-    model = get_encoder_decoder(cfg)
+    model = get_encoder_decoder(cfg,device)
     model = model.to(device)
     if len(gpus) > 1:
         model = nn.DataParallel(model, device_ids=gpus, dim=0)
@@ -90,12 +91,19 @@ def train(cfg):
             
             inputs,targets = data 
             outputs = model(inputs.to(device))
+            params = None
+            
+            if isinstance(outputs,tuple):
+                params  = outputs[0]
+                outputs = outputs[1]
+                
             
             outputs = convert_outputs(outputs,cfg['tasks'])
             targets = convert_targets(targets,cfg['tasks'])
             
             losses,loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
             running_loss.update(loss)
+            #make_dot(loss).view()
             loss.backward()
             optimizer.step()
             train_loss_meters.update(losses)
@@ -103,6 +111,11 @@ def train(cfg):
                 print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, i + 1, running_loss.avg))
                 for k, v in train_loss_meters.meters.items():
                     print("{} loss: {}".format(k, v.avg))
+                if params is not None:
+                    print('**************** Cross-Stitch Parameters ***************')
+                    for param in params:
+                        param = torch.sigmoid(param.data).cpu().numpy()
+                        print(param/param.sum(axis=0,keepdims=1))
                 #break
             running_loss.reset()
             train_loss_meters.reset()
