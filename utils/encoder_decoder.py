@@ -206,7 +206,7 @@ class _cross_stitch_layer(nn.Module):
             eye[ones]  = 1.0
             eye[zeros] = -1.0
             #eye = torch.sigmoid(eye)
-            self.cross_stitch = nn.Parameter(torch.randn(n_tasks,n_tasks))#,device=device))
+            self.cross_stitch = nn.Parameter(torch.eye(n_tasks))#,device=device))
         self.cross_stitch.requiresGrad = True
         
         #self.cross_stitch_parameter = nn.ParameterList([self.cross_stitch])

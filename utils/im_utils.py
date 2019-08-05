@@ -136,7 +136,21 @@ def imshow(img):
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
     plt.show()
     
+# name to label object
+name2label      = { label.name    : label for label in labels           }
+# id to label object
+id2label        = { label.id      : label for label in labels           }
+# trainId to label object
+trainId2label   = { label.trainId : label for label in reversed(labels) }
+# category to list of label objects
+category2labels = {}
 
+for label in labels:
+    category = label.category
+    if category in category2labels:
+        category2labels[category].append(label)
+    else:
+        category2labels[category] = [label]
         
 
 

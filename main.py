@@ -5,6 +5,7 @@ Created on Fri Jul 19 07:59:23 2019
 
 @author: sumche
 """
+
 import argparse
 import os
 import datetime
@@ -13,7 +14,6 @@ from tqdm import tqdm
 
 import torch
 from torch import nn
-from torchviz import make_dot
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
@@ -115,7 +115,7 @@ def train(cfg):
                     print('**************** Cross-Stitch Parameters ***************')
                     for param in params:
                         param = torch.sigmoid(param.data).cpu().numpy()
-                        print(param/param.sum(axis=0,keepdims=1))
+                        print(param)#/param.sum(axis=0,keepdims=1))
                 #break
             running_loss.reset()
             train_loss_meters.reset()
@@ -128,6 +128,10 @@ def train(cfg):
                 inputs,targets = data 
                 outputs = model(inputs.to(device))
                 
+                if isinstance(outputs,tuple):
+                    params  = outputs[0]
+                    outputs = outputs[1]
+
                 outputs     = convert_outputs(outputs,cfg['tasks'])
                 predictions = post_process_outputs(outputs,cfg['tasks'])
                 targets     = convert_targets(targets,cfg['tasks'])

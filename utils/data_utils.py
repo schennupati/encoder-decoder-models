@@ -10,7 +10,7 @@ import numpy as np
 
 from tqdm import tqdm
 
-from utils.im_utils import labels
+from utils.im_utils import labels,id2label
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -41,7 +41,14 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
     return torch.tensor(inv_dep_img).type(torch.float32)
 
 def convert_targets_instance(targets,permute=(0,2,3,1)):
-    return torch.squeeze((targets).permute(permute))
+
+    targets = targets.permute(permute)
+    n, h, w,c = targets.size()
+    centroids = torch.zeros((n,h,w,3))
+    for i in range(n):
+        centroids[i] = torch.tensor(regress_centers(torch.squeeze(targets[i]).numpy()))
+        
+    return centroids.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
 
 def get_convert_fn(task):
     if task == 'semantic':
@@ -161,4 +168,25 @@ def get_weights(cfg):
             weights[task] = None
     
     return weights
+
+def regress_centers(Image):
+    instances = np.unique(Image)
+    instances = instances[instances > 1000]
+
+    mask = np.zeros_like(Image)
+    mask[np.where(Image > 1000)] = 1
+
+    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3])
+    centroid_regression[:, :, 2] = mask
+
+    for instance in instances:
+        # step A - get a center (x,y) for each instance
+        instance_pixels = np.where(Image == instance)
+        y_c, x_c = np.mean(instance_pixels[0]), np.mean(instance_pixels[1])
+        # step B - calculate dist_x, dist_y of each pixel of instance from its center
+        y_dist = (-y_c + instance_pixels[0])
+        x_dist = (-x_c + instance_pixels[1])
+        for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
+            centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
+    return centroid_regression
             

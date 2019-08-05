@@ -9,14 +9,23 @@ tasks:
     semantic:
         out_channels: 19
         loss: cross_entropy2d
+        loss_weight: 1.0
         type: long
         metric: classification_metrics
         postproc: argmax
     disparity:
         out_channels: 1
         loss: mae_loss
+        loss_weight: 1.0
         type: float
         metric: regression_metrics
+        postproc: None
+    instance:
+        out_channels: 2
+        loss: instance_loss
+        loss_weight: 0.3
+        type: float
+        metric: None
         postproc: None
         
 data:
