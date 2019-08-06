@@ -25,7 +25,6 @@ from utils.dataloader import get_dataloaders
 from utils.checkpoint_loader import get_checkpoint
 
 def train(cfg):
-    
     gpus = list(range(torch.cuda.device_count()))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
@@ -57,8 +56,9 @@ def train(cfg):
     
     ###### Define dataloaders, model, optimizers and metrics######
     dataloaders = get_dataloaders(cfg)
-    model = get_encoder_decoder(cfg,device)
+    model = get_encoder_decoder(cfg)
     model = model.to(device)
+    print(model)
     if len(gpus) > 1:
         model = nn.DataParallel(model, device_ids=gpus, dim=0)
         
@@ -114,7 +114,7 @@ def train(cfg):
                 if params is not None:
                     print('**************** Cross-Stitch Parameters ***************')
                     for param in params:
-                        param = torch.sigmoid(param.data).cpu().numpy()
+                        param = param.data.cpu().numpy()
                         print(param)#/param.sum(axis=0,keepdims=1))
                 #break
             running_loss.reset()

@@ -1,8 +1,6 @@
 model:
-    encoder: resnet50 # resnet 18 and resnet34 are not supported with fpn
+    encoder: resnet101 # resnet 18 and resnet34 are not supported with fpn
     decoder: fpn
-    cross_stitch:
-        flag: True
     pretrained_path: /home/sumche/results
 
 tasks:
@@ -31,9 +29,9 @@ tasks:
 data:
     dataset: Cityscapes
     root_path: /home/sumche/datasets/Cityscapes
-    im_size: &im_size 256
+    im_size: &im_size 512
     random_scaling: &random_scaling !!python/tuple [0.5, 1.0]
-    val_im_size: &val_im_size 256
+    val_im_size: &val_im_size 1024
     transforms:
         train:
             input:
@@ -85,7 +83,7 @@ data:
                     flag: True
                     
 params:
-    batchsize: &batch_size 1
+    batchsize: &batch_size 4
     n_workers: &n_workers 8
     print_interval: 50
     resume: True
