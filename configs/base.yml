@@ -84,7 +84,7 @@ data:
                     flag: True
                     
 params:
-    batchsize: &batch_size 1
+    batchsize: &batch_size 2
     n_workers: &n_workers 8
     print_interval: 50
     resume: True

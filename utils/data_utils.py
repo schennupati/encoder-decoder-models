@@ -10,7 +10,7 @@ import numpy as np
 
 from tqdm import tqdm
 
-from utils.im_utils import labels,id2label
+from utils.im_utils import labels
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -26,19 +26,23 @@ def convert_targets_semantic(targets,permute=(0,2,3,1),labels=labels):
     return torch.tensor(new_targets)
 
 def convert_targets_disparity(targets,permute=(0,2,3,1)):
-    
+    normalized_dep = []
+    n = targets.size()[0] if len(targets.size())>2 else 1
     targets = torch.squeeze((targets).permute(permute)).numpy()
     targets[targets>0] = (targets[targets>0]-1)/256
-    #mask = targets > 0
-    inv_dep_img = targets/(0.209313*2262.52)
-    #inv_dep = np.reciprocal(inv_dep_img)
-    #min_inv_dep = np.min(inv_dep)
-    #max_inv_dep = np.max(inv_dep)
-    
-    #normalized_dep = (inv_dep-min_inv_dep)/(max_inv_dep-min_inv_dep)
-    #img_dep = np.repeat(np.expand_dims(normalized_dep[0],axis=-1),3,axis=-1)
-    
-    return torch.tensor(inv_dep_img).type(torch.float32)
+    inv_dep = targets/(0.209313*2262.52)
+
+    if n > 1:
+        for i in range(n):    
+            min_inv_dep = np.min(inv_dep[i])
+            max_inv_dep = np.max(inv_dep[i])
+            normalized_dep.append((inv_dep[i]-min_inv_dep)/(max_inv_dep-min_inv_dep))
+    else:
+        min_inv_dep = np.min(inv_dep)
+        max_inv_dep = np.max(inv_dep)
+        normalized_dep = (inv_dep-min_inv_dep)/(max_inv_dep-min_inv_dep)
+        
+    return torch.tensor(normalized_dep).type(torch.float32)
 
 def convert_targets_instance(targets,permute=(0,2,3,1)):
 
@@ -48,7 +52,7 @@ def convert_targets_instance(targets,permute=(0,2,3,1)):
     for i in range(n):
         centroids[i] = torch.tensor(regress_centers(torch.squeeze(targets[i]).numpy()))
         
-    return centroids.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
+    return centroids#.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
 
 def get_convert_fn(task):
     if task == 'semantic':

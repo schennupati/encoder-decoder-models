@@ -98,7 +98,7 @@ def mse_loss(input, target, weight=None, size_average=True):
     return F.mse_loss(input, target)
 
 def instance_loss(input, target, weight=None, size_average=None):
-    target = target[:,:-1,:,:]
+    target = target[:,:,:,:-1]
     if input.size() !=target.size():
         input = input.permute(0,2,3,1).squeeze()
         

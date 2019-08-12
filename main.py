@@ -21,7 +21,7 @@ from utils.optimizers import get_optimizer
 from utils.data_utils import convert_targets, convert_outputs, post_process_outputs, get_weights
 from utils.metrics import metrics
 from utils.loss_utils import compute_loss, loss_meters, averageMeter
-from utils.im_utils import cat_labels, imshow
+from utils.im_utils import cat_labels
 from utils.dataloader import get_dataloaders 
 from utils.checkpoint_loader import get_checkpoint
 
