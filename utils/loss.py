@@ -98,16 +98,12 @@ def mse_loss(input, target, weight=None, size_average=True):
     return F.mse_loss(input, target)
 
 def instance_loss(input, target, weight=None, size_average=None):
-    mask = target[:,-1,:, :].unsqueeze(1)
-    mask = torch.cat([mask,mask],1)
     target = target[:,:-1,:,:]
-    numel = target.numel()
-    val_pix = torch.sum(mask)
     if input.size() !=target.size():
         input = input.permute(0,2,3,1).squeeze()
         
-    loss = F.l1_loss(input*mask, target*mask) 
-    return loss*(numel/val_pix)
+    loss = F.l1_loss(input, target) 
+    return loss
 
     
     

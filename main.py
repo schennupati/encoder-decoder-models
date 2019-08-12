@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 import torch
 from torch import nn
+import torchprof
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
@@ -58,9 +59,13 @@ def train(cfg):
     dataloaders = get_dataloaders(cfg)
     model = get_encoder_decoder(cfg)
     model = model.to(device)
-    print(model)
+    data = iter(dataloaders['train']).next()[0].to(device)
+    #print(model)
     if len(gpus) > 1:
         model = nn.DataParallel(model, device_ids=gpus, dim=0)
+    with torchprof.Profile(model, use_cuda=True) as prof:
+        model(data)
+    print(prof.display(show_events=False))
         
     optimizer_cls = get_optimizer(params['train'])
     optimizer_params = {k: v for k, v in params['train']["optimizer"].items() if k != "name"}      

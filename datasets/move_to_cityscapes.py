@@ -8,7 +8,7 @@ Created on Thu Jul 25 20:50:59 2019
 import os
 import shutil
 
-path_to_additional_data = '/home/sumche/datasets/Cityscapes/disparity'
+path_to_additional_data = '/home/sumche/datasets/Cityscapes/gtFine'
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine'
 
 def get_total_files_count(path,ext='.png'):
@@ -37,6 +37,8 @@ if new_data_count == annotations_count:
                                     root.split('/')[-1],
                                     name)
                 shutil.copy2(src,dest,follow_symlinks=False)
+                
+
                 
 
     

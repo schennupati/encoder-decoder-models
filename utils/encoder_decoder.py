@@ -5,9 +5,6 @@ Created on Thu Jul 25 20:00:48 2019
 
 @author: sumche
 """
-#TODO: Update to use VGG, DenseNet etc  
-#TODO: Update to use PSPNet, DeepLabV3 etc as decoders
-#TODO: Implement multi-task feature.
 from collections import OrderedDict
 
 from torch import nn
@@ -75,24 +72,10 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     for task in tasks.keys():
         decoder = decoder_fn(inplanes, tasks[task]["out_channels"])
         decoders.extend([decoder])
-        
-    op_names,ops = get_ops(decoders)
-    
 
     model = Encoder_Decoder(encoder, decoders, cfg['model'])
     
     return model
-
-def get_ops(decoders):
-    op_names = {}
-    ops = {}
-    for i,decoder in enumerate(decoders):
-        op_names[i] = []
-        ops[i] = nn.ModuleList()
-        for op_name,op in decoder.named_children():
-            op_names[i].append(op_name)
-            ops[i].extend([op])
-    return op_names, ops
         
 
 
