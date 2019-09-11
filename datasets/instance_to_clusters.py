@@ -32,7 +32,7 @@ def regress_centers(Image):
     mask = np.zeros_like(Image)
     mask[np.where(Image > 1000)] = 1
 
-    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3])
+    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3]).astype(np.int16)
     centroid_regression[:, :, 2] = mask
 
     for instance in instances:
@@ -54,6 +54,4 @@ for root, dirs, names in os.walk(path_to_annotations, topdown=False):
             image = cv2.imread(os.path.join(root,name),-1)
 
             centroids = regress_centers(image)
-            break
-print(os.path.join(root,identifier))
-np.save(os.path.join(root,identifier),centroids)
+            np.savez_compressed(os.path.join(root,identifier),centroids)
