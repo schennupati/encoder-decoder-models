@@ -7,7 +7,7 @@ Created on Tue Jul 30 11:06:24 2019
 """
 import torch
 import numpy as np
-
+import yaml
 from tqdm import tqdm
 
 from utils.im_utils import labels
@@ -193,4 +193,13 @@ def regress_centers(Image):
         for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
             centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
     return centroid_regression
+
+def get_cfg(config):
+    with open(config) as fp:
+        cfg = yaml.load(fp, Loader=yaml.FullLoader)
+    for task in list(cfg['tasks'].keys()):
+        if not cfg['tasks'][task]['flag']:
+            del cfg['tasks'][task]
+    return cfg
+    
             

@@ -10,9 +10,8 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 
-path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/train'
+path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
 def get_total_files_count(path,ext='.png'):

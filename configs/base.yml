@@ -7,6 +7,7 @@ model:
 
 tasks:
     disparity:
+        flag: False
         out_channels: 1
         loss: mae_loss
         loss_weight: 1.0
@@ -14,6 +15,7 @@ tasks:
         metric: regression_metrics
         postproc: None
     semantic:
+        flag: True
         out_channels: 19
         loss: cross_entropy2d
         loss_weight: 1.0
@@ -21,6 +23,7 @@ tasks:
         metric: classification_metrics
         postproc: argmax
     instance:
+        flag: False
         out_channels: 2
         loss: instance_loss
         loss_weight: 0.3
