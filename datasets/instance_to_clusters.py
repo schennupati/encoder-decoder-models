@@ -10,7 +10,7 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
-
+#import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
@@ -24,6 +24,37 @@ def get_total_files_count(path,ext='.png'):
 
 annotations_count = get_total_files_count(path_to_annotations,'instanceIds.png')
 
+def convert_centroids(centroids,op='normalize'):
+    converted_centroid_regression = np.zeros([centroids.shape[0], centroids.shape[1], 3])
+    centroids_x = centroids[:,:,1]
+    centroids_y = centroids[:,:,0]
+    centorids_mask = centroids[:,:,2]
+    
+    if op == 'normalize':
+        centroids_x = normalize(centroids_x)
+        centroids_y = normalize(centroids_y)
+    elif op == 'denormalize':
+        centroids_x = denormalize(centroids_x)
+        centroids_y = denormalize(centroids_y)
+    elif op == 'down_scale':
+        centroids_x = down_scale(centroids_x,max_value=1024)
+        centroids_y = down_scale(centroids_y,max_value=2048)
+            
+    converted_centroid_regression[:,:,1] = centroids_x
+    converted_centroid_regression[:,:,0] = centroids_y
+    converted_centroid_regression[:,:,2] = centorids_mask
+    
+    return converted_centroid_regression  
+
+def normalize(array,max_value=1.0):
+    return (array + max_value)/(2*max_value)
+    
+def denormalize(array,max_value=1.0):
+    return max_value*(2*array-1)
+    
+def down_scale(array,max_value):
+    return array/max_value
+    
 def regress_centers(Image):
     instances = np.unique(Image)
     instances = instances[instances > 1000]
@@ -31,7 +62,7 @@ def regress_centers(Image):
     mask = np.zeros_like(Image)
     mask[np.where(Image > 1000)] = 1
 
-    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3]).astype(np.int16)
+    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3])
     centroid_regression[:, :, 2] = mask
 
     for instance in instances:
@@ -43,14 +74,26 @@ def regress_centers(Image):
         x_dist = (-x_c + instance_pixels[1])
         for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
             centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
-    return centroid_regression
+            
+            
+    centroids = convert_centroids(centroid_regression,op='down_scale')               
+    normalized_centroid_regression = convert_centroids(centroids,op='normalize')
+    #plt.imshow(centroids[:,:,0])
+    #plt.show()
+    #plt.imshow(centroids[:,:,1])
+    #plt.show()
+    #plt.imshow(centroids[:,:,2])
+    #plt.show()
+    #denormalized_centroid_regression = convert_centroids(normalized_centroid_regression,op='denormalize')    
+    return normalized_centroid_regression
 
-for root, dirs, names in os.walk(path_to_annotations, topdown=False):
-    for name in tqdm(names):
-        if name.endswith("instanceIds.png") :
-            #os.remove(os.path.join(root,name))
-            identifier = name.split('.')[0]
-            image = cv2.imread(os.path.join(root,name),-1)
+def convert_instance_to_clusters(path_to_annotations):
+    for root, dirs, names in os.walk(path_to_annotations, topdown=False):
+        for name in tqdm(names):
+            if name.endswith("instanceIds.png") :
+                identifier = name.split('.')[0]
+                image = cv2.imread(os.path.join(root,name),-1)
 
-            centroids = regress_centers(image)
-            np.savez_compressed(os.path.join(root,identifier),centroids)
+                centroids = regress_centers(image)
+                np.savez_compressed(os.path.join(root,identifier),centroids)
+

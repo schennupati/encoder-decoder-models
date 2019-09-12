@@ -15,18 +15,18 @@ tasks:
         metric: regression_metrics
         postproc: None
     semantic:
-        flag: True
+        flag: False
         out_channels: 19
         loss: cross_entropy2d
         loss_weight: 1.0
         type: long
         metric: classification_metrics
         postproc: argmax
-    instance:
-        flag: False
+    instance_cluster:
+        flag: True
         out_channels: 2
         loss: instance_loss
-        loss_weight: 0.3
+        loss_weight: 1.0
         type: float
         metric: None
         postproc: None
@@ -37,7 +37,7 @@ data:
     root_path: /home/sumche/datasets/Cityscapes
     im_size: &im_size 256
     random_scaling: &random_scaling !!python/tuple [0.5, 1.0]
-    val_im_size: &val_im_size 512
+    val_im_size: &val_im_size 256
     transforms:
         train:
             input:
@@ -51,7 +51,7 @@ data:
                     flag: False
                     size: *im_size
                 ColorJitter: 
-                    flag: True
+                    flag: False
                     brightness: 0.25
                     contrast: 0.25
                     saturation: 0.25 

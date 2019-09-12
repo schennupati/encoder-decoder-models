@@ -13,6 +13,7 @@ from collections import namedtuple
 
 from .vision import VisionDataset
 from PIL import Image
+import matplotlib.pyplot as plt
 
 
 class Cityscapes(VisionDataset):
@@ -129,8 +130,8 @@ class Cityscapes(VisionDataset):
         if not isinstance(target_type, list):
             self.target_type = [target_type]
 
-        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity'] for t in self.target_type):
-            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "semantic", "polygon"'
+        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity','instance_cluster'] for t in self.target_type):
+            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "instance_cluster", "semantic", "polygon"'
                              ' or "color"')
 
         if not os.path.isdir(self.images_dir) or not os.path.isdir(self.targets_dir):
@@ -165,6 +166,9 @@ class Cityscapes(VisionDataset):
         for i, t in enumerate(self.target_type):
             if t == 'polygon':
                 target = self._load_json(self.targets[index][i])
+            elif t == 'instance_cluster':
+                im_array = np.load(self.targets[index][i])['arr_0']
+                target = Image.fromarray(np.uint8(im_array*255.0))
             else:
                 target = Image.open(self.targets[index][i])
 
@@ -214,4 +218,6 @@ class Cityscapes(VisionDataset):
             return '{}_polygons.json'.format(mode)
         elif target_type == 'disparity':
             return 'disparity.png'
+        elif target_type == 'instance_cluster':
+            return '{}_instanceIds.npz'.format(mode)
 

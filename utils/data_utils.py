@@ -11,6 +11,7 @@ import yaml
 from tqdm import tqdm
 
 from utils.im_utils import labels
+from datasets.instance_to_clusters import convert_centroids
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -50,8 +51,7 @@ def convert_targets_instance(targets,permute=(0,2,3,1)):
     n, h, w,c = targets.size()
     centroids = torch.zeros((n,h,w,3))
     for i in range(n):
-        centroids[i] = torch.tensor(regress_centers(torch.squeeze(targets[i]).numpy()))
-        
+        centroids[i] = torch.tensor(convert_centroids(torch.squeeze(targets[i]).numpy(),op='denormalize'))
     return centroids#.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
 
 def get_convert_fn(task):
@@ -59,7 +59,7 @@ def get_convert_fn(task):
         return (convert_targets_semantic)
     elif task == 'disparity':
         return (convert_targets_disparity)
-    elif task == 'instance':
+    elif task == 'instance_cluster':
         return (convert_targets_instance)
     else:
         return None
