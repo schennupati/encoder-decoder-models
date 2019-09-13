@@ -57,7 +57,8 @@ class _FPNModel(nn.Module):
         
         layers = []
         layers.append(nn.Conv2d(in_channels, out_channels, kernel_size,padding=int(kernel_size/2)))
-        layers.append(get_activation(activation,True))
+        if activate_last:
+            layers.append(get_activation(activation,True))
         if upsample:
             layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True))
             if activate_last:
