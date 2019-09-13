@@ -9,7 +9,8 @@ tasks:
     disparity:
         flag: False
         out_channels: 1
-        use_relu: True
+        activation: ReLU
+        activate_last: True
         loss: mae_loss
         loss_weight: 1.0
         type: float
@@ -18,7 +19,8 @@ tasks:
     semantic:
         flag: True
         out_channels: 19
-        use_relu: True
+        activation: ReLU
+        activate_last: True
         loss: cross_entropy2d
         loss_weight: 1.0
         type: long
@@ -27,7 +29,8 @@ tasks:
     instance_cluster:
         flag: True
         out_channels: 2
-        use_relu: False
+        activation: Tanh
+        activate_last: False
         loss: instance_loss
         loss_weight: 1.0
         type: float

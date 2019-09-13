@@ -10,6 +10,7 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
+
 #import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
@@ -24,29 +25,29 @@ def get_total_files_count(path,ext='.png'):
 
 annotations_count = get_total_files_count(path_to_annotations,'instanceIds.png')
 
-def convert_centroids(centroids,op='normalize',stride=1):
-    converted_centroid_regression = np.zeros([centroids.shape[0], centroids.shape[1], 3])
+def convert_centroids(centroids,op='normalize',stride=1,instance_prob=True):
+    
+    #converted_centroid_regression = torch.zeros_like(centroids) if tensor else np.zeros_like(centroids)
+        
+    if instance_prob:
+        centroids[:,:,2] = centroids[:,:,2]
 
     if op == 'normalize':
-        centroids_x = normalize(centroids[:,:,1])
-        centroids_y = normalize(centroids[:,:,0])
+        centroids[:,:,1] = normalize(centroids[:,:,1])
+        centroids[:,:,0] = normalize(centroids[:,:,0])
     elif op == 'denormalize':
-        centroids_x = denormalize(centroids[:,:,1])
-        centroids_y = denormalize(centroids[:,:,0])
+        centroids[:,:,1] = denormalize(centroids[:,:,1])
+        centroids[:,:,0] = denormalize(centroids[:,:,0])
     elif op == 'down_scale':
-        centroids_x = down_scale(centroids[:,:,1],max_value=1024)
-        centroids_y = down_scale(centroids[:,:,0],max_value=2048)
+        centroids[:,:,1] = down_scale(centroids[:,:,1],max_value=1024)
+        centroids[:,:,0] = down_scale(centroids[:,:,0],max_value=2048)
     elif op == 'up_scale':
-        centroids_x = up_scale(centroids[:,:,1],max_value=1024,stride=stride)
-        centroids_y = up_scale(centroids[:,:,0],max_value=2048,stride=stride)
+        centroids[:,:,1] = up_scale(centroids[:,:,1],max_value=1024,stride=stride)
+        centroids[:,:,0] = up_scale(centroids[:,:,0],max_value=2048,stride=stride)
     else:
         raise ValueError('Unkown op to convert centroids')
-            
-    converted_centroid_regression[:,:,1] = centroids_x
-    converted_centroid_regression[:,:,0] = centroids_y
-    converted_centroid_regression[:,:,2] = centroids[:,:,2]
     
-    return converted_centroid_regression  
+    return centroids  
 
 def normalize(array,max_value=1.0):
     return (array + max_value)/(2*max_value)

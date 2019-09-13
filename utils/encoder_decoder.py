@@ -74,7 +74,8 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
             task_cfg = tasks[task]
             decoder = decoder_fn(inplanes, 
                                  task_cfg["out_channels"],
-                                 task_cfg["use_relu"])
+                                 task_cfg["activation"],
+                                 task_cfg["activate_last"])
             decoders.extend([decoder])
 
     model = Encoder_Decoder(encoder, decoders, cfg['model'])

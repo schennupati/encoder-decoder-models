@@ -1,30 +1,28 @@
 from torch import nn
-
+from utils.model_uitls import get_activation
 #TODO: Update FPN to take Cross-Stitch
 
 class _FPNModel(nn.Module):
 
-    def __init__(self, in_planes =[2048,1024,512], n_class =19,use_relu=True):
+    def __init__(self, in_planes =[2048,1024,512], n_class =19,activation='ReLU',activate_last=True):
         super().__init__()
         self.n_class = n_class
         self.out_channels = 128
-        self.upsample1_1  = self.upsample(in_planes[0],256,use_relu)
-        self.upsample1_2  = self.upsample(256,256,use_relu)
-        self.upsample1_3  = self.upsample(256,self.out_channels,use_relu)
+        self.upsample1_1  = self.upsample(in_planes[0],256,activation)
+        self.upsample1_2  = self.upsample(256,256,activation)
+        self.upsample1_3  = self.upsample(256,self.out_channels,activation)
         self.bn1          = nn.BatchNorm2d(self.out_channels)
-        self.upsample2_1  = self.upsample(in_planes[1],256,use_relu)
-        self.upsample2_2  = self.upsample(256,self.out_channels,use_relu)
+        self.upsample2_1  = self.upsample(in_planes[1],256,activation)
+        self.upsample2_2  = self.upsample(256,self.out_channels,activation)
         self.bn2          = nn.BatchNorm2d(self.out_channels)
-        self.upsample3    = self.upsample(in_planes[2],self.out_channels,use_relu)
+        self.upsample3    = self.upsample(in_planes[2],self.out_channels,activation)
         self.bn3          = nn.BatchNorm2d(self.out_channels)
-        if use_relu:
-            self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[3], self.out_channels, 3,padding=1), 
-                                              nn.ReLU(inplace=True))
-        else:
-            self.upsample4    = nn.Sequential(nn.Conv2d(in_planes[3], self.out_channels, 3,padding=1))
+        self.upsample4    = self.upsample(in_planes[3], self.out_channels,activation,
+                                          upsample=False,kernel_size=3)
         self.bn4          = nn.BatchNorm2d(self.out_channels)
         self.upsample5    = self.upsample(self.out_channels,self.n_class,
-                                          use_relu,1,4,2)
+                                          activation,activate_last=False, 
+                                          upsample=True,kernel_size=1,factor=4)
 
     def forward(self, intermediate_result, layers):
         
@@ -54,17 +52,19 @@ class _FPNModel(nn.Module):
         
         return score  # size=(N, n_class, x.H/1, x.W/1)
     
-    def upsample(self,in_channels,out_channels,use_relu=True,kernel_size=3,factor=2,dilation=1,bn=True):
+    def upsample(self, in_channels, out_channels, activation='ReLU', activate_last =True,
+                 upsample =True, kernel_size=3, factor=2, dilation=1):
         
         layers = []
         layers.append(nn.Conv2d(in_channels, out_channels, kernel_size,padding=int(kernel_size/2)))
-        if use_relu:
-            layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True))
-        if use_relu:
-            layers.append(nn.ReLU(inplace=True))
+        layers.append(get_activation(activation,True))
+        if upsample:
+            layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True))
+            if activate_last:
+                layers.append(get_activation(activation,True))
         
         return nn.Sequential(*layers)
+
     
 class FPN(_FPNModel):
     """

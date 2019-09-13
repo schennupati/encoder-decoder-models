@@ -45,16 +45,25 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
         
     return torch.tensor(normalized_dep).type(torch.float32)
 
-def convert_targets_instance(targets,permute=(0,2,3,1)):
+def convert_targets_instance(targets,permute=(0,2,3,1),instance_prob=True):
 
     targets = targets.permute(permute)
     #print('Normalized targets:',torch.unique(targets[0,:,:,0]*255.0))
     n, h, w, c = targets.size()
     stride = 1024/h
-    centroids = torch.zeros((n,h,w,3))
+    centroids = torch.zeros((n,h,w,3)) if instance_prob else torch.zeros((n,h,w,2))
     for i in range(n):
-        denormalized_centroids = convert_centroids(torch.squeeze(targets[i]).numpy(),op='denormalize')
-        centroids[i] = torch.tensor(convert_centroids(denormalized_centroids,op='up_scale',stride=stride))
+        if not instance_prob:
+            denormalized_centroids = torch.squeeze(targets[i])
+            centroids[i] = torch.tensor(convert_centroids(denormalized_centroids,
+                                                          op='up_scale',stride=stride,
+                                                          instance_prob=instance_prob))
+        else:
+            denormalized_centroids = convert_centroids(torch.squeeze(targets[i]),
+                                                                     op='denormalize')
+            centroids[i] = convert_centroids(denormalized_centroids,
+                                             op='up_scale',stride=stride)
+        
     #print('Denormalized targets:',torch.unique(centroids[0,:,:,0]))
     return centroids#.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
 
@@ -176,6 +185,19 @@ def get_weights(cfg):
             weights[task] = None
     
     return weights
+
+def up_scale_tensors(tensor):
+    n,h,w,c = tensor.size()
+    stride = 1024/h
+    if len(tensor.shape)==4:
+        tensor_x = tensor[:,:,:,1]*1024/stride
+        tensor_y = tensor[:,:,:,0]*2048/stride
+        
+    elif len(tensor.shape)==3:
+        tensor_x = tensor[:,:,:,1]*1024/stride
+        tensor_y = tensor[:,:,:,0]*2048/stride
+    
+    return torch.stack((tensor_x,tensor_y),-1)
 
 def regress_centers(Image):
     instances = np.unique(Image)

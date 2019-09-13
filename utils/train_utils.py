@@ -20,6 +20,8 @@ from utils.loss_utils import compute_loss, loss_meters
 from utils.im_utils import cat_labels
 from utils.checkpoint_loader import get_checkpoint
 
+import matplotlib.pyplot as plt
+
 def get_device(cfg):
     #TODO: Fetch device using cfg
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -141,6 +143,8 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
+        plt.imshow(predictions['instance_cluster'][0,0,:,:].cpu())
+        plt.show()
         current_loss = running_val_loss.avg
         running_val_loss.reset()
         val_loss_meters.reset()
