@@ -9,14 +9,16 @@ tasks:
     disparity:
         flag: False
         out_channels: 1
+        use_relu: True
         loss: mae_loss
         loss_weight: 1.0
         type: float
         metric: regression_metrics
         postproc: None
     semantic:
-        flag: False
+        flag: True
         out_channels: 19
+        use_relu: True
         loss: cross_entropy2d
         loss_weight: 1.0
         type: long
@@ -25,6 +27,7 @@ tasks:
     instance_cluster:
         flag: True
         out_channels: 2
+        use_relu: False
         loss: instance_loss
         loss_weight: 1.0
         type: float

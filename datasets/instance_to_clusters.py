@@ -24,25 +24,27 @@ def get_total_files_count(path,ext='.png'):
 
 annotations_count = get_total_files_count(path_to_annotations,'instanceIds.png')
 
-def convert_centroids(centroids,op='normalize'):
+def convert_centroids(centroids,op='normalize',stride=1):
     converted_centroid_regression = np.zeros([centroids.shape[0], centroids.shape[1], 3])
-    centroids_x = centroids[:,:,1]
-    centroids_y = centroids[:,:,0]
-    centorids_mask = centroids[:,:,2]
-    
+
     if op == 'normalize':
-        centroids_x = normalize(centroids_x)
-        centroids_y = normalize(centroids_y)
+        centroids_x = normalize(centroids[:,:,1])
+        centroids_y = normalize(centroids[:,:,0])
     elif op == 'denormalize':
-        centroids_x = denormalize(centroids_x)
-        centroids_y = denormalize(centroids_y)
+        centroids_x = denormalize(centroids[:,:,1])
+        centroids_y = denormalize(centroids[:,:,0])
     elif op == 'down_scale':
-        centroids_x = down_scale(centroids_x,max_value=1024)
-        centroids_y = down_scale(centroids_y,max_value=2048)
+        centroids_x = down_scale(centroids[:,:,1],max_value=1024)
+        centroids_y = down_scale(centroids[:,:,0],max_value=2048)
+    elif op == 'up_scale':
+        centroids_x = up_scale(centroids[:,:,1],max_value=1024,stride=stride)
+        centroids_y = up_scale(centroids[:,:,0],max_value=2048,stride=stride)
+    else:
+        raise ValueError('Unkown op to convert centroids')
             
     converted_centroid_regression[:,:,1] = centroids_x
     converted_centroid_regression[:,:,0] = centroids_y
-    converted_centroid_regression[:,:,2] = centorids_mask
+    converted_centroid_regression[:,:,2] = centroids[:,:,2]
     
     return converted_centroid_regression  
 
@@ -54,6 +56,9 @@ def denormalize(array,max_value=1.0):
     
 def down_scale(array,max_value):
     return array/max_value
+
+def up_scale(array,max_value,stride):
+    return array*max_value/stride
     
 def regress_centers(Image):
     instances = np.unique(Image)

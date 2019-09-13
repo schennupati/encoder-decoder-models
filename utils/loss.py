@@ -6,9 +6,9 @@ Created on Tue Jul 23 19:55:03 2019
 @author: sumche
 """
 #Source: https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loss/loss.py
-
 import torch
 import torch.nn.functional as F
+
 
 def cross_entropy2d(input, target, weight=None, size_average=True):
     n, c, h, w = input.size()
@@ -22,12 +22,10 @@ def cross_entropy2d(input, target, weight=None, size_average=True):
     #Handle inconsistent size between input and target
     if h != ht and w != wt:  # upsample labels
         input = F.interpolate(input, size=(ht, wt), mode="bilinear", align_corners=True)
-
     input = input.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
     target = target.view(-1)
     loss = F.cross_entropy(
-        input, target, weight=weight, ignore_index=255, reduction='mean'
-    )
+        input, target, weight=weight, ignore_index=255)
     return loss
 
 
@@ -101,7 +99,8 @@ def instance_loss(input, target, weight=None, size_average=None):
     target = target[:,:,:,:-1]
     if input.size() !=target.size():
         input = input.permute(0,2,3,1).squeeze()
-        
+        target = target.squeeze()
+
     loss = F.l1_loss(input, target) 
     return loss
 

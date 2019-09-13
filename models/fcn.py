@@ -4,7 +4,7 @@ from torch import nn
 
 class _FCNModel(nn.Module):
 
-    def __init__(self, in_planes =[2048,1024,512], n_class =19):
+    def __init__(self, in_planes =[2048,1024,512], n_class =19,use_relu=True):
         super().__init__()
         
         self.n_class = n_class

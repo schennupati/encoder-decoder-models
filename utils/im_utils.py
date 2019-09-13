@@ -121,7 +121,7 @@ def decode_segmap(image, nc=19, labels =labels):
   b = np.zeros_like(image).astype(np.uint8)
    
   for l in range(0, nc):
-    idx = image == l
+    idx = np.where(image == l)
     l = get_trainId(l)
     r[idx] = labels[l].color[ 0]
     g[idx] = labels[l].color[ 1]

@@ -71,7 +71,10 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     
     for task in tasks.keys():
         if tasks[task]['flag']:
-            decoder = decoder_fn(inplanes, tasks[task]["out_channels"])
+            task_cfg = tasks[task]
+            decoder = decoder_fn(inplanes, 
+                                 task_cfg["out_channels"],
+                                 task_cfg["use_relu"])
             decoders.extend([decoder])
 
     model = Encoder_Decoder(encoder, decoders, cfg['model'])

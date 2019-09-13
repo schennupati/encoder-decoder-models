@@ -10,24 +10,26 @@ from tqdm import tqdm
 
 from utils.data_utils import get_weights, get_cfg
 from utils.loss_utils import averageMeter
-from utils.dataloader import get_dataloaders 
-from utils.train_utils import get_device,get_config_params,get_model,\
-                              init_optimizer,get_losses_and_metrics,\
-                              if_checkpoint_exists,load_checkpoint,\
-                              train_step,validation_step,print_metrics,\
-                              stop_training,save_model
-                              
+from utils.dataloader import get_dataloaders
+from utils.train_utils import get_device, get_config_params, get_model, \
+                              init_optimizer, get_losses_and_metrics, \
+                              if_checkpoint_exists, load_checkpoint, \
+                              train_step, validation_step, print_metrics, \
+                              stop_training, save_model
+
+
 def train(cfg):
-    ###### Define Configuration parameters #####
+    # Define Configuration parameters
     weights = get_weights(cfg)
     device = get_device(cfg)
-    params,epochs,patience,early_stop,base_dir,exp_name,resume_training,\
-    print_interval,best_loss,start_iter,plateau_count,state = get_config_params(cfg)
+    params, epochs, patience, early_stop, base_dir, exp_name, \
+    resume_training, print_interval, best_loss, start_iter, \
+    plateau_count, state = get_config_params(cfg)
 
-    ###### Define dataloaders, model, optimizers and metrics######
+    # Define dataloaders, model, optimizers and metrics
     dataloaders = get_dataloaders(cfg)
-    model = get_model(cfg,device)
-    optimizer = init_optimizer(model,params)
+    model = get_model(cfg, device)
+    optimizer = init_optimizer(model, params)
     train_loss_meters, val_loss_meters, val_metrics = get_losses_and_metrics(cfg)
     
     check_point_exists = if_checkpoint_exists(exp_name,base_dir)

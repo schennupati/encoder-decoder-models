@@ -48,10 +48,14 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
 def convert_targets_instance(targets,permute=(0,2,3,1)):
 
     targets = targets.permute(permute)
-    n, h, w,c = targets.size()
+    #print('Normalized targets:',torch.unique(targets[0,:,:,0]*255.0))
+    n, h, w, c = targets.size()
+    stride = 1024/h
     centroids = torch.zeros((n,h,w,3))
     for i in range(n):
-        centroids[i] = torch.tensor(convert_centroids(torch.squeeze(targets[i]).numpy(),op='denormalize'))
+        denormalized_centroids = convert_centroids(torch.squeeze(targets[i]).numpy(),op='denormalize')
+        centroids[i] = torch.tensor(convert_centroids(denormalized_centroids,op='up_scale',stride=stride))
+    #print('Denormalized targets:',torch.unique(centroids[0,:,:,0]))
     return centroids#.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
 
 def get_convert_fn(task):

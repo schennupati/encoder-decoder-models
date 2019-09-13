@@ -13,8 +13,7 @@ from collections import namedtuple
 
 from .vision import VisionDataset
 from PIL import Image
-import matplotlib.pyplot as plt
-
+from datasets.instance_to_clusters import convert_centroids
 
 class Cityscapes(VisionDataset):
     """`Cityscapes <http://www.cityscapes-dataset.com/>`_ Dataset.
@@ -168,6 +167,8 @@ class Cityscapes(VisionDataset):
                 target = self._load_json(self.targets[index][i])
             elif t == 'instance_cluster':
                 im_array = np.load(self.targets[index][i])['arr_0']
+                #print('Normalized:',np.unique(im_array[:,:,0]))
+                #print('Denormalized:',np.unique(convert_centroids(im_array,op='denormalize')))
                 target = Image.fromarray(np.uint8(im_array*255.0))
             else:
                 target = Image.open(self.targets[index][i])
