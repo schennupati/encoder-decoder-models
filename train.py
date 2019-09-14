@@ -19,8 +19,8 @@ from utils.train_utils import get_device, get_config_params, get_model, \
 
 def train(cfg):
     # Define Configuration parameters
-    weights = get_weights(cfg)
     device = get_device(cfg)
+    weights = get_weights(cfg,device)
     params, epochs, patience, early_stop, base_dir, exp_name, \
     resume_training, print_interval, best_loss, start_iter, \
     plateau_count, state = get_config_params(cfg)
@@ -47,7 +47,7 @@ def train(cfg):
         for step, data in tqdm(enumerate(dataloaders['train'])):
             train_step(model,data,optimizer,cfg,device,weights,
                        running_loss,train_loss_meters,
-                       print_interval,n_steps,epoch,step,writer)            
+                       print_interval,n_steps,epoch,step,writer)
         val_metrics, current_loss = validation_step(model,dataloaders,cfg,device,
                                                     weights,running_val_loss,
                                                     val_loss_meters,val_metrics,
@@ -57,7 +57,6 @@ def train(cfg):
                                                    best_loss,plateau_count,
                                                    start_iter,epoch,state)             
         stop_training(patience,plateau_count,early_stop,epoch,state)
-    
     writer.close()
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ model:
 
 tasks:
     semantic:
-        active: True
+        active: False
         out_channels: 19
         activation: ReLU
         activate_last: True
@@ -96,7 +96,9 @@ data:
                     
 params:
     batchsize: &batch_size 4
-    n_workers: &n_workers 0
+    n_workers: &n_workers 8
+    multigpu: False
+    gpu_id: 0
     print_interval: 50
     resume: True
     early_stop: True

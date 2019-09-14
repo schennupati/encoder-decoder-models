@@ -173,14 +173,14 @@ def cityscapes_semantic_weights(num_classes):
     
     return class_weights
 
-def get_weights(cfg):
+def get_weights(cfg,device):
     dataset = cfg['data']['dataset']
     tasks = cfg['tasks']
     weights = {}
     for task in tasks.keys():
         if dataset == 'Cityscapes' and task == 'semantic':
             weight = cityscapes_semantic_weights(tasks[task]['out_channels'])
-            weights[task] = torch.FloatTensor(weight).cuda()
+            weights[task] = torch.FloatTensor(weight).to(device)
         else:
             weights[task] = None
     

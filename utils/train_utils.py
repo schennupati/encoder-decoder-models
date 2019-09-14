@@ -22,11 +22,9 @@ from utils.loss_utils import compute_loss, loss_meters
 from utils.im_utils import cat_labels,decode_segmap
 from utils.checkpoint_loader import get_checkpoint
 
-import matplotlib.pyplot as plt
-
 def get_device(cfg):
-    #TODO: Fetch device using cfg
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device_str = 'cuda:{}'.format(cfg['params']['gpu_id']) if not cfg['params']['multigpu'] else "cuda:0"
+    device = torch.device(device_str if torch.cuda.is_available() else "cpu")
     return device
 
 def get_exp_name(cfg):
@@ -99,13 +97,17 @@ def init_optimizer(model,params):
     optimizer = optimizer_cls(model.parameters(), **optimizer_params)
     
     return optimizer
-    
-def get_model(cfg,device):
-    gpus = list(range(torch.cuda.device_count()))
+
+def get_model(cfg,device,multigpu=False):
+    #gpus = list(range(torch.cuda.device_count()))
     model = get_encoder_decoder(cfg)
     model = model.to(device)
-    if len(gpus) > 1:
-        model = nn.DataParallel(model, device_ids=gpus, dim=0)
+    #n = cfg['params']['batchsize']
+    #h = cfg['data']['im_size']
+    #se = SizeEstimator(model, input_size=(n,3,h,2*h))
+    #print(se)
+    #if len(gpus) > 1:
+    #    model = nn.DataParallel(model, device_ids=gpus, dim=0)
     return model
 
 def get_losses_and_metrics(cfg):
@@ -129,8 +131,8 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
     optimizer.step()
     train_loss_meters.update(losses)
     
-    if step % print_interval == print_interval - 1 or step == n_steps-1:
-        print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, step + 1, running_loss.avg))
+    if step % print_interval == 0 or step == n_steps-1:
+        print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, step , running_loss.avg))
         writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
         for k, v in train_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
@@ -154,14 +156,12 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
             val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
-        
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
         writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
-        idx = np.random.random_integers(i)
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
             writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
-            add_images_to_writer(predictions,writer,k,idx,epoch)
+            add_images_to_writer(inputs,predictions,writer,k,epoch)
 
         current_loss = running_val_loss.avg
         running_val_loss.reset()
@@ -203,19 +203,20 @@ def stop_training(patience,plateau_count,early_stop,epoch,state):
         for k, v in state.items():
             print("{} ({})".format(k, v))
             
-def add_images_to_writer(predictions,writer,task,idx,epoch):
+def add_images_to_writer(inputs,predictions,writer,task,epoch):
+    
+    img = inputs[0,:,:,:]
+    writer.add_image('Images/Input_image',img,epoch,dataformats='CHW')
     if task == 'semantic':
-        img = decode_segmap(predictions[task][idx,:,:,:])
-        writer.add_figure('Images/validation_{}'.format(task),
-                          plt.imshow(img),epoch)
+        img = decode_segmap(predictions[task][0,:,:].cpu())
+        writer.add_image('Images/validation_{}'.format(task),
+                          img,epoch,dataformats='HWC')
     elif task == 'instance_cluster':
-        x_img = predictions[task][idx,1,:,:]
-        y_img = predictions[task][idx,0,:,:]
-        writer.add_figure('Images/validation_{}_dx'.format(task),
-                          plt.imshow(x_img),epoch)
-        writer.add_figure('Images/validation_{}_dy'.format(task),
-                          plt.imshow(y_img),epoch)
-        
+        x_img = predictions[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        y_img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+
+        writer.add_image('Images/validation_{}_dx'.format(task),x_img,epoch)
+        writer.add_image('Images/validation_{}_dy'.format(task),y_img,epoch)
     
     
 

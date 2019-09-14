@@ -10,6 +10,7 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
+import json
 
 #import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
