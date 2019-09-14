@@ -7,7 +7,7 @@ model:
 
 tasks:
     semantic:
-        active: True
+        active: False
         out_channels: 19
         activation: ReLU
         activate_last: True

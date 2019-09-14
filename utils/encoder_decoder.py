@@ -70,7 +70,7 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     decoders = nn.ModuleList()
     
     for task in tasks.keys():
-        if tasks[task]['flag']:
+        if tasks[task]['active']:
             task_cfg = tasks[task]
             decoder = decoder_fn(inplanes, 
                                  task_cfg["out_channels"],

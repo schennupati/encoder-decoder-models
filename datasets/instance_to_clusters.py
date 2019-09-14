@@ -102,4 +102,5 @@ def convert_instance_to_clusters(path_to_annotations):
 
                 centroids = regress_centers(image)
                 np.savez_compressed(os.path.join(root,identifier),centroids)
-
+#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
+#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')

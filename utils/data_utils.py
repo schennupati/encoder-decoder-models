@@ -55,9 +55,9 @@ def convert_targets_instance(targets,permute=(0,2,3,1),instance_prob=True):
     for i in range(n):
         if not instance_prob:
             denormalized_centroids = torch.squeeze(targets[i])
-            centroids[i] = torch.tensor(convert_centroids(denormalized_centroids,
-                                                          op='up_scale',stride=stride,
-                                                          instance_prob=instance_prob))
+            centroids[i] = convert_centroids(denormalized_centroids, 
+                                             op='up_scale',stride=stride, 
+                                             instance_prob=instance_prob)
         else:
             denormalized_centroids = convert_centroids(torch.squeeze(targets[i]),
                                                                      op='denormalize')
@@ -224,7 +224,7 @@ def get_cfg(config):
     with open(config) as fp:
         cfg = yaml.load(fp, Loader=yaml.FullLoader)
     for task in list(cfg['tasks'].keys()):
-        if not cfg['tasks'][task]['flag']:
+        if not cfg['tasks'][task]['active']:
             del cfg['tasks'][task]
     return cfg
     
