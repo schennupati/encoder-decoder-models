@@ -96,7 +96,7 @@ data:
                     
 params:
     batchsize: &batch_size 4
-    n_workers: &n_workers 8
+    n_workers: &n_workers 0
     print_interval: 50
     resume: True
     early_stop: True

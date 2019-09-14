@@ -7,17 +7,19 @@ Created on Wed Sep 11 14:16:32 2019
 """
 import os
 import datetime
+import numpy as np
 from tqdm import tqdm
 
 import torch
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
 from utils.data_utils import convert_targets, convert_outputs, post_process_outputs
 from utils.metrics import metrics
 from utils.loss_utils import compute_loss, loss_meters
-from utils.im_utils import cat_labels
+from utils.im_utils import cat_labels,decode_segmap
 from utils.checkpoint_loader import get_checkpoint
 
 import matplotlib.pyplot as plt
@@ -47,6 +49,14 @@ def get_save_path(cfg):
     path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
      
     return path,exp_name,time_stamp
+
+def get_writer(cfg):
+    base_dir = cfg["model"]["pretrained_path"]
+    _,exp_name,time_stamp = get_save_path(cfg)
+    log_dir = os.path.join(base_dir,'logs',"{}_{}".format(exp_name,time_stamp))
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    return SummaryWriter(log_dir=log_dir)
 
 def get_config_params(cfg):
         
@@ -106,7 +116,7 @@ def get_losses_and_metrics(cfg):
     return train_loss_meters, val_loss_meters, val_metrics
 
 def train_step(model,data,optimizer,cfg,device,weights,running_loss,
-               train_loss_meters,print_interval,n_steps,epoch,step):
+               train_loss_meters,print_interval,n_steps,epoch,step,writer):
     
     optimizer.zero_grad()
     inputs,targets = data 
@@ -121,14 +131,18 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
     
     if step % print_interval == print_interval - 1 or step == n_steps-1:
         print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, step + 1, running_loss.avg))
+        writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
         for k, v in train_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
+            writer.add_scalar('Loss/train_{}'.format(k), v.avg, epoch*n_steps + step)
             
     running_loss.reset()
     train_loss_meters.reset()
     
+    return None
+    
 def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
-                    val_loss_meters,val_metrics,epoch):
+                    val_loss_meters,val_metrics,epoch,writer):
     print('\n********************* validation ********************') 
     with torch.no_grad():
         for i,data in tqdm(enumerate(dataloaders['val'])):
@@ -140,11 +154,15 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
             val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
+        
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
+        writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
+        idx = np.random.random_integers(i)
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
-        plt.imshow(predictions['instance_cluster'][0,0,:,:].cpu())
-        plt.show()
+            writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
+            add_images_to_writer(predictions,writer,k,idx,epoch)
+
         current_loss = running_val_loss.avg
         running_val_loss.reset()
         val_loss_meters.reset()
@@ -184,3 +202,22 @@ def stop_training(patience,plateau_count,early_stop,epoch,state):
         print('Best Checkpoint:')
         for k, v in state.items():
             print("{} ({})".format(k, v))
+            
+def add_images_to_writer(predictions,writer,task,idx,epoch):
+    if task == 'semantic':
+        img = decode_segmap(predictions[task][idx,:,:,:])
+        writer.add_figure('Images/validation_{}'.format(task),
+                          plt.imshow(img),epoch)
+    elif task == 'instance_cluster':
+        x_img = predictions[task][idx,1,:,:]
+        y_img = predictions[task][idx,0,:,:]
+        writer.add_figure('Images/validation_{}_dx'.format(task),
+                          plt.imshow(x_img),epoch)
+        writer.add_figure('Images/validation_{}_dy'.format(task),
+                          plt.imshow(y_img),epoch)
+        
+    
+    
+
+    
+    

@@ -13,7 +13,6 @@ from collections import namedtuple
 
 from .vision import VisionDataset
 from PIL import Image
-from datasets.instance_to_clusters import convert_centroids
 
 class Cityscapes(VisionDataset):
     """`Cityscapes <http://www.cityscapes-dataset.com/>`_ Dataset.
@@ -166,10 +165,7 @@ class Cityscapes(VisionDataset):
             if t == 'polygon':
                 target = self._load_json(self.targets[index][i])
             elif t == 'instance_cluster':
-                im_array = np.load(self.targets[index][i])['arr_0']
-                #print('Normalized:',np.unique(im_array[:,:,0]))
-                #print('Denormalized:',np.unique(convert_centroids(im_array,op='denormalize')))
-                target = Image.fromarray(np.uint8(im_array*255.0))
+                target = self._load_npz(self.targets[index][i])
             else:
                 target = Image.open(self.targets[index][i])
 
@@ -207,6 +203,10 @@ class Cityscapes(VisionDataset):
         with open(path, 'r') as file:
             data = json.load(file)
         return data
+    
+    def _load_npz(self,path):
+        im_array = np.load(path)['arr_0']
+        return Image.fromarray(np.uint8(im_array*255.0))
 
     def _get_target_suffix(self, mode, target_type):
         if target_type == 'instance':
