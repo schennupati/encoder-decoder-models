@@ -3,11 +3,12 @@
 ## TODO:
 * Functionalities
 	- [ ] Implement cluster to instance post processing.
-	- [ ] Implement multi-task loss algorithms.
-	- [ ] Implement single panoptic branch.
 	- [ ] Implement panoptic post processing.
-	- [ ] Add disparity images to tensorboard.
 	- [ ] Add instance IoU and panoptic (SQ,TQ) metrics.
+	- [ ] Implement single panoptic branch.
+	- [ ] Implement multi-task loss algorithms.
+	- [ ] Implement Test script.
+	- [ ] Add disparity images to tensorboard.
 
 * Tests
 	- [ ] Verify semantic cross entropy 2d loss function.
