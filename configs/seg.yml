@@ -7,7 +7,7 @@ model:
 
 tasks:
     semantic:
-        active: False
+        active: True
         out_channels: 19
         activation: ReLU
         activate_last: True
@@ -17,7 +17,7 @@ tasks:
         metric: classification_metrics
         postproc: argmax
     instance_cluster:
-        active: True
+        active: False
         out_channels: 2
         activation: Tanh
         activate_last: False
@@ -97,6 +97,8 @@ data:
 params:
     batchsize: &batch_size 4
     n_workers: &n_workers 8
+    multigpu: False
+    gpu_id: 0
     print_interval: 50
     resume: True
     early_stop: True
