@@ -21,7 +21,7 @@ def train(cfg):
     # Define Configuration parameters
     device = get_device(cfg)
     weights = get_weights(cfg,device)
-    params, epochs, patience, early_stop, base_dir, exp_name, \
+    params, epochs, patience, early_stop, exp_dir, \
     resume_training, print_interval, best_loss, start_iter, \
     plateau_count, state = get_config_params(cfg)
     writer = get_writer(cfg)
@@ -31,10 +31,10 @@ def train(cfg):
     optimizer = init_optimizer(model, params)
     train_loss_meters, val_loss_meters, val_metrics = get_losses_and_metrics(cfg)
     
-    check_point_exists = if_checkpoint_exists(exp_name,base_dir)
+    check_point_exists = if_checkpoint_exists(exp_dir)
     if check_point_exists and resume_training:
         model,optimizer,start_iter,best_loss = load_checkpoint(model,optimizer,
-                                                               exp_name,base_dir)
+                                                               exp_dir)
     else:
         print("Begining Training from Scratch")
                     
@@ -56,7 +56,8 @@ def train(cfg):
         state,best_loss,plateau_count = save_model(model,optimizer,cfg,current_loss,
                                                    best_loss,plateau_count,
                                                    start_iter,epoch,state)             
-        stop_training(patience,plateau_count,early_stop,epoch,state)
+        if stop_training(patience,plateau_count,early_stop,epoch,state):
+            break
     writer.close()
 
 if __name__ == "__main__":

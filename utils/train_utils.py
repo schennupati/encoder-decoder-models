@@ -6,6 +6,7 @@ Created on Wed Sep 11 14:16:32 2019
 @author: sumche
 """
 import os
+import glob
 import datetime
 import numpy as np
 from tqdm import tqdm
@@ -20,14 +21,13 @@ from utils.data_utils import convert_targets, convert_outputs, post_process_outp
 from utils.metrics import metrics
 from utils.loss_utils import compute_loss, loss_meters
 from utils.im_utils import cat_labels,decode_segmap
-from utils.checkpoint_loader import get_checkpoint
 
 def get_device(cfg):
     device_str = 'cuda:{}'.format(cfg['params']['gpu_id']) if not cfg['params']['multigpu'] else "cuda:0"
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
     return device
 
-def get_exp_name(cfg):
+def get_exp_dir(cfg):
     encoder_name = cfg["model"]["encoder"]
     decoder_name = cfg["model"]["decoder"]
     imsize  = cfg['data']['im_size']
@@ -35,23 +35,26 @@ def get_exp_name(cfg):
     ###### Define Experiment save path ######
     if base_dir is None:
         base_dir =  os.path.join(os.path.expanduser('~'),'results')
-    if not os.path.exists(base_dir):
-        os.makedirs(base_dir)
-        
-    return encoder_name + '-' + decoder_name +'-' + str(imsize) + '-' + '_'.join(cfg['tasks'].keys())
+    exp_name = (encoder_name + '-' + decoder_name +'-' + str(imsize) ) 
+    task_name = '_'.join(cfg['tasks'].keys())
+    exp_dir_path = os.path.join(base_dir,task_name,exp_name)
     
-def get_save_path(cfg):    
-    base_dir = cfg["model"]["pretrained_path"]
-    exp_name = get_exp_name(cfg) 
+    if not os.path.exists(exp_dir_path):
+        os.makedirs(exp_dir_path)
+        
+    return exp_dir_path,task_name,exp_name
+    
+def get_save_path(cfg,best_loss=None):    
+    exp_dir_path,task_name,exp_name = get_exp_dir(cfg) 
     time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
-    path = os.path.join(base_dir,"{}_{}_best_model.pkl".format(exp_name,time_stamp))
+    path = os.path.join(exp_dir_path,"{}_best-loss_{}.pkl".format(time_stamp,best_loss))
      
-    return path,exp_name,time_stamp
+    return path,exp_name,task_name,time_stamp
 
 def get_writer(cfg):
     base_dir = cfg["model"]["pretrained_path"]
-    _,exp_name,time_stamp = get_save_path(cfg)
-    log_dir = os.path.join(base_dir,'logs',"{}_{}".format(exp_name,time_stamp))
+    _,exp_name,task_name,time_stamp = get_save_path(cfg)
+    log_dir = os.path.join(base_dir,'logs',task_name,exp_name,"{}".format(time_stamp))
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     return SummaryWriter(log_dir=log_dir)
@@ -59,30 +62,50 @@ def get_writer(cfg):
 def get_config_params(cfg):
         
     params = cfg['params']
-    base_dir = cfg["model"]["pretrained_path"]
-    exp_name = get_exp_name(cfg)
+    #base_dir = cfg["model"]["pretrained_path"]
+    exp_dir,_,_ = get_exp_dir(cfg)
     resume_training = params["resume"]        
     epochs = params["epochs"]
     patience = params["patience"]
     early_stop = params["early_stop"]
     print_interval = params['print_interval']
-    best_loss = 1e10
+    best_loss = 1e6
     start_iter = 0
     plateau_count = 0
     state = None
     
-    return params,epochs,patience,early_stop,base_dir,exp_name,resume_training,\
+    return params,epochs,patience,early_stop,exp_dir,resume_training,\
            print_interval,best_loss,start_iter,plateau_count,state
 
-def if_checkpoint_exists(exp_name,base_dir):
-    if get_checkpoint(exp_name,base_dir) is not None:
+def get_best_model(list_of_models):
+    best_loss  = 1e6
+    best_model = None
+    for model in list_of_models:
+        checkpoint_name = model.split('/')[-1].split('.pkl')[0]
+        loss = float(checkpoint_name.split('_')[-1])
+        if loss < best_loss:
+            best_loss = loss
+            best_model = model
+    return best_model
+    
+def get_checkpoint_list(exp_dir):
+    return glob.glob(os.path.join(exp_dir,'*.pkl'))
+
+def get_checkpoint(exp_dir):
+    list_of_models = get_checkpoint_list(exp_dir)
+    checkpoint_name = get_best_model(list_of_models)
+    return checkpoint_name, torch.load(checkpoint_name)
+
+def if_checkpoint_exists(exp_dir):
+    list_of_models = get_checkpoint_list(exp_dir)
+    if len(list_of_models) != 0:
         return True
     else:
         return False
 
-def load_checkpoint(model,optimizer,exp_name,base_dir):
+def load_checkpoint(model,optimizer,base_dir):
     ###### load pre trained models ######
-    checkpoint_name,checkpoint = get_checkpoint(exp_name,base_dir)
+    checkpoint_name,checkpoint = get_checkpoint(base_dir)
     model.load_state_dict(checkpoint["model_state"])
     optimizer.load_state_dict(checkpoint["optimizer_state"])
     start_iter = checkpoint["epoch"]
@@ -187,21 +210,35 @@ def save_model(model,optimizer,cfg,current_loss,best_loss,plateau_count,start_it
         best_loss = current_loss
         state = {"epoch": start_iter + epoch + 1,"model_state": model.state_dict(),
                  "optimizer_state": optimizer.state_dict(),"best_loss": best_loss}
-        save_path,exp_name,time_stamp = get_save_path(cfg)
+        save_path,_,_,time_stamp = get_save_path(cfg,best_loss)
         torch.save(state, save_path)
-        print("\nSaving checkpoint '{}_{}_best_model.pkl' (epoch {})".format(exp_name,time_stamp, epoch+1))
+        deleted_old = delete_old_checkpoint(save_path)
+        print("Saving checkpoint '{}_best-loss_{}.pkl' (epoch {})".format(time_stamp,best_loss,epoch+1))
+        if deleted_old:
+            print('Deleted old checkpoints')
         plateau_count = 0
     else:
         plateau_count +=1
         
     return state,best_loss,plateau_count
 
+def delete_old_checkpoint(save_path):
+    removed = False
+    path = '/'.join(save_path.split('/')[:-1])
+    list_of_models = get_checkpoint_list(path)
+    for model in list_of_models:
+        if model not in save_path:
+            os.remove(model)
+            removed = True
+    return removed
+            
+    
+
 def stop_training(patience,plateau_count,early_stop,epoch,state):
     if plateau_count == patience and early_stop:
         print('Early Stopping after {} epochs: Patience of {} epochs reached.'.format(epoch+1,plateau_count))
         print('Best Checkpoint:')
-        for k, v in state.items():
-            print("{} ({})".format(k, v))
+        return True
             
 def add_images_to_writer(inputs,predictions,writer,task,epoch):
     
@@ -217,6 +254,10 @@ def add_images_to_writer(inputs,predictions,writer,task,epoch):
 
         writer.add_image('Images/validation_{}_dx'.format(task),x_img,epoch)
         writer.add_image('Images/validation_{}_dy'.format(task),y_img,epoch)
+    
+    elif task == 'disparity':
+        img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        writer.add_image('Images/validation_{}'.format(task),img,epoch)
     
     
 

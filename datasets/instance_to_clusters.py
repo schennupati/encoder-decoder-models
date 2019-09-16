@@ -10,9 +10,8 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
-import json
-
-#import matplotlib.pyplot as plt
+from datasets.clusters_to_instances import calc_clusters_img
+import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
@@ -100,8 +99,16 @@ def convert_instance_to_clusters(path_to_annotations):
             if name.endswith("instanceIds.png") :
                 identifier = name.split('.')[0]
                 image = cv2.imread(os.path.join(root,name),-1)
-
                 centroids = regress_centers(image)
-                np.savez_compressed(os.path.join(root,identifier),centroids)
+                denormalized_centroids = convert_centroids(centroids,op='denormalize')               
+                up_centroids= convert_centroids(denormalized_centroids,op='up_scale')
+                clusters_img = calc_clusters_img(up_centroids)
+                plt.imshow(clusters_img)
+                plt.show()
+                break
+                #np.savez_compressed(os.path.join(root,identifier),centroids)
+
+
+
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')

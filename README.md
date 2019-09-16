@@ -8,7 +8,7 @@
 	- [ ] Implement single panoptic branch.
 	- [ ] Implement multi-task loss algorithms.
 	- [ ] Implement Test script.
-	- [ ] Add disparity images to tensorboard.
+	- [x] Add disparity images to tensorboard.
 
 * Tests
 	- [ ] Verify semantic cross entropy 2d loss function.
