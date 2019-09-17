@@ -10,7 +10,7 @@ import os
 import numpy as np
 import cv2
 from tqdm import tqdm
-from datasets.clusters_to_instances import calc_clusters_img
+from clusters_to_instances import to_rgb
 import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
@@ -93,6 +93,21 @@ def regress_centers(Image):
     #denormalized_centroid_regression = convert_centroids(normalized_centroid_regression,op='denormalize')    
     return normalized_centroid_regression
 
+def get_centers(centroids):
+    dx_img, dy_img = centroids[:,:,1], centroids[:,:,0]
+    centers = []
+    instance_img = np.zeros_like(dx_img)
+    for h, rows in enumerate(zip(dx_img, dy_img)):
+        dx_row, dy_row = rows[0], rows[1]
+        for w, deltas in enumerate(zip(dx_row, dy_row)):
+            dx, dy = deltas[0], deltas[1]
+            if dx!=0 and dy!=0:
+                center = (int(w-dx),int(h-dy))
+                if center not in centers:
+                    centers.append(center)
+                instance_img[h,w] = centers.index(center)
+    return centers, instance_img
+
 def convert_instance_to_clusters(path_to_annotations):
     for root, dirs, names in os.walk(path_to_annotations, topdown=False):
         for name in tqdm(names):
@@ -102,13 +117,22 @@ def convert_instance_to_clusters(path_to_annotations):
                 centroids = regress_centers(image)
                 denormalized_centroids = convert_centroids(centroids,op='denormalize')               
                 up_centroids= convert_centroids(denormalized_centroids,op='up_scale')
-                clusters_img = calc_clusters_img(up_centroids)
-                plt.imshow(clusters_img)
+                centers, instance_img = get_centers(up_centroids)
+                plt.imshow(to_rgb(instance_img))
                 plt.show()
+                '''
+                for i,center in enumerate(centers):
+                    print(i,center)
+                    plt.imshow(instance_img==i)
+                    plt.show()
+                '''
+                #clusters_img = calc_clusters_img(up_centroids)
+                #plt.imshow(clusters_img)
+                #plt.show()
                 break
                 #np.savez_compressed(os.path.join(root,identifier),centroids)
 
 
 
-#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
+convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')

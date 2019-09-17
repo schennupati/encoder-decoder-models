@@ -96,6 +96,7 @@ class Optics():
                 self._update(point_neighbors, point, seeds)
                 # as long as we have unprocessed neighbors...
                 while (seeds):
+                    print(len(seeds))
                     # find the neighbor n with smallest reachability distance
                     seeds.sort(key=lambda n: n.rd)
                     n = seeds.pop(0)
@@ -157,19 +158,20 @@ def to_rgb(bw_im):
     rgb_im = [np.zeros(bw_im.shape), np.zeros(bw_im.shape), np.zeros(bw_im.shape)]
     for instance in instances:
         color = get_color(instance)
-        rgb_im[0][instance == bw_im] = color[0]
-        rgb_im[1][instance == bw_im] = color[1]
-        rgb_im[2][instance == bw_im] = color[2]
-    return np.concatenate([np.concatenate([np.expand_dims(rgb_im[0], -1), np.expand_dims(rgb_im[1], -1)], 2), np.expand_dims(rgb_im[2], -1)], 2)
+        rgb_im[0][instance == bw_im] = int(color[0])
+        rgb_im[1][instance == bw_im] = int(color[1])
+        rgb_im[2][instance == bw_im] = int(color[2])
+    return np.stack([rgb_im[0],rgb_im[1],rgb_im[2]],axis=-1)
+    #return np.concatenate([np.concatenate([np.expand_dims(rgb_im[0], -1), np.expand_dims(rgb_im[1], -1)], 2), np.expand_dims(rgb_im[2], -1)], 2)
 
 def calc_clusters_img(raw_img):
     pts_list = pre_process(raw_img)
-    min_cluster_size = 10
-    epsilon = 100
-    cluster_limmit = 100
+    min_cluster_size = 5
+    epsilon = 5
+    cluster_limit = 100
     op = Optics(pts_list, min_cluster_size, epsilon)
     _ = op.run()
-    clusters = op.cluster(cluster_limmit)
+    clusters = op.cluster(cluster_limit)
     new_img = np.zeros((raw_img.shape[0], raw_img.shape[1]))
     for i, cluster in zip(range(len(clusters)), clusters):
         for pt in cluster.points:
