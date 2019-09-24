@@ -184,7 +184,7 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
             writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
-            add_images_to_writer(inputs,predictions,writer,k,epoch)
+            add_images_to_writer(inputs,outputs,predictions,writer,k,epoch)
 
         current_loss = running_val_loss.avg
         running_val_loss.reset()
@@ -240,7 +240,7 @@ def stop_training(patience,plateau_count,early_stop,epoch,state):
         print('Best Checkpoint:')
         return True
             
-def add_images_to_writer(inputs,predictions,writer,task,epoch):
+def add_images_to_writer(inputs,outputs,predictions,writer,task,epoch):
     
     img = inputs[0,:,:,:]
     writer.add_image('Images/Input_image',img,epoch,dataformats='CHW')
@@ -249,8 +249,8 @@ def add_images_to_writer(inputs,predictions,writer,task,epoch):
         writer.add_image('Images/validation_{}'.format(task),
                           img,epoch,dataformats='HWC')
     elif task == 'instance_cluster':
-        x_img = predictions[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        y_img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        x_img = outputs[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        y_img = outputs[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
 
         writer.add_image('Images/validation_{}_dx'.format(task),x_img,epoch)
         writer.add_image('Images/validation_{}_dy'.format(task),y_img,epoch)

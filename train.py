@@ -25,6 +25,7 @@ def train(cfg):
     resume_training, print_interval, best_loss, start_iter, \
     plateau_count, state = get_config_params(cfg)
     writer = get_writer(cfg)
+    
     # Define dataloaders, model, optimizers and metrics
     dataloaders = get_dataloaders(cfg)
     model = get_model(cfg, device)
@@ -62,7 +63,9 @@ def train(cfg):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="config")
-    parser.add_argument("--config",nargs="?",type=str,default="configs/base.yml",help="Configuration to use")
+    parser.add_argument("--config", nargs="?", 
+                        type=str, default="configs/base.yml", 
+                        help="Configuration to use")
     args = parser.parse_args()    
     cfg = get_cfg(args.config)
     train(cfg)

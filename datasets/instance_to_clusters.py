@@ -9,9 +9,6 @@ Created on Tue Aug  6 08:25:54 2019
 import os
 import numpy as np
 import cv2
-from tqdm import tqdm
-from clusters_to_instances import to_rgb
-import matplotlib.pyplot as plt
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
@@ -60,6 +57,11 @@ def down_scale(array,max_value):
 
 def up_scale(array,max_value,stride):
     return array*max_value/stride
+
+def closest_node(node, nodes):
+    nodes = np.asarray(nodes)
+    dist_2 = np.sum((nodes - node)**2, axis=1)
+    return np.min(dist_2), np.argmin(dist_2)
     
 def regress_centers(Image):
     instances = np.unique(Image)
@@ -103,36 +105,78 @@ def get_centers(centroids):
             dx, dy = deltas[0], deltas[1]
             if dx!=0 and dy!=0:
                 center = (int(w-dx),int(h-dy))
-                if center not in centers:
+                if len(centers) !=0:
+                    closest_distance,closest_center = closest_node(center, centers)
+                    if closest_distance > 10.0:
+                        centers.append(center)
+                    else: 
+                        center = centers[closest_center]
+                else:
                     centers.append(center)
                 instance_img[h,w] = centers.index(center)
-    return centers, instance_img
+    return instance_img
 
+def get_centers_vectorized(centroids):
+    dx_img, dy_img = centroids[:,:,1], centroids[:,:,0]
+    center_x, center_y = np.zeros_like(dx_img,dtype=int),np.zeros_like(dy_img,dtype=int)
+    mask = (dx_img!=0).astype(int)*(dy_img!=0).astype(int)
+    h,w = center_x.shape
+    
+    for i in range(w):
+        center_x[:,i] = i
+    for j in range(h):
+        center_y[j,:] = j
+        
+    center_x = mask*(center_x - dx_img.astype(int))
+    center_y = mask*(center_y - dy_img.astype(int))
+    centers_new = np.where(((center_x * center_y) !=0),(center_x,center_y),0)
+    instances = np.zeros_like(center_x)
+    instance_id = 0
+    for w in np.unique(center_x):
+        for h in np.unique(center_y):
+            instance_x = (centers_new[0,:,:]==w).astype(int)
+            instance_y = (centers_new[1,:,:]==h).astype(int)
+            if np.sum(instance_x*instance_y)!=0 and h*w !=0:
+                instance_id +=1
+                instances[np.where(instance_x*instance_y==1)] = instance_id
+                
+    return instances
+    
 def convert_instance_to_clusters(path_to_annotations):
     for root, dirs, names in os.walk(path_to_annotations, topdown=False):
-        for name in tqdm(names):
+        for name in names:
             if name.endswith("instanceIds.png") :
                 identifier = name.split('.')[0]
                 image = cv2.imread(os.path.join(root,name),-1)
                 centroids = regress_centers(image)
+                
+                '''
                 denormalized_centroids = convert_centroids(centroids,op='denormalize')               
                 up_centroids= convert_centroids(denormalized_centroids,op='up_scale')
-                centers, instance_img = get_centers(up_centroids)
+                start = time.time()
+                instance_img = get_centers(up_centroids)
+                end = time.time()
+            
+                print('\nTime with two loops: {}'.format(end-start))
+                start = time.time()
+                instance_img = get_centers_vectorized(up_centroids)
+                end = time.time()
+                print('\nTime with vectorization : {}'.format(end-start))
                 plt.imshow(to_rgb(instance_img))
                 plt.show()
-                '''
                 for i,center in enumerate(centers):
                     print(i,center)
                     plt.imshow(instance_img==i)
                     plt.show()
-                '''
+            
                 #clusters_img = calc_clusters_img(up_centroids)
                 #plt.imshow(clusters_img)
                 #plt.show()
                 break
-                #np.savez_compressed(os.path.join(root,identifier),centroids)
+                '''
+                np.savez_compressed(os.path.join(root,identifier),centroids)
 
 
 
-convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
+#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')
