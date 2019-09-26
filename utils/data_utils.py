@@ -11,7 +11,7 @@ import yaml
 from tqdm import tqdm
 
 from utils.im_utils import labels
-from datasets.instance_to_clusters import convert_centroids, get_centers
+from datasets.instance_to_clusters import convert_centroids, get_centers, to_rgb
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -115,17 +115,17 @@ def post_process_outputs(outputs,cfg):
             converted_outputs[task] = torch.argmax(outputs[task],dim=1)
         elif cfg[task]['postproc'] == 'cluster_to_instance':
             n,h,w,c = outputs[task].size()
-            converted_outputs[task] = cluster_to_instance(outputs[task].cpu().numpy())
+            converted_outputs[task] = cluster_to_instance(outputs[task])
         else:
             converted_outputs[task] = outputs[task]
     return converted_outputs
 
 def cluster_to_instance(outputs):
-    outputs = outputs.permute(0,2,3,1)
-    n,h,w,c = outputs.size()
-    predictions = torch.zeros(n,h,w,3)
+    n,c,h,w = outputs.size()
+    outputs = outputs.permute(0,2,3,1).cpu().numpy()
+    predictions = np.zeros((n,h,w,3))
     for i in range(n):
-        predictions[i,:,:,:] = get_centers(outputs[i,:,:,:])
+        predictions[i,:,:,:] = to_rgb(get_centers(outputs[i,:,:,:]))
 
     return predictions        
 

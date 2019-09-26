@@ -174,18 +174,19 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
             inputs,targets = data 
             outputs = model(inputs.to(device))
             outputs     = convert_outputs(outputs,cfg['tasks'])
-            predictions = post_process_outputs(outputs,cfg['tasks'])
             targets     = convert_targets(targets,cfg['tasks'])
             val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
+            break
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
         writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
+        predictions = post_process_outputs(outputs,cfg['tasks'])
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
             writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
             add_images_to_writer(inputs,outputs,predictions,writer,k,epoch)
-
+            
         current_loss = running_val_loss.avg
         running_val_loss.reset()
         val_loss_meters.reset()

@@ -9,6 +9,9 @@ Created on Tue Aug  6 08:25:54 2019
 import os
 import numpy as np
 import cv2
+import time
+import matplotlib.pyplot as plt
+#from clusters_to_instances import to_rgb
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
@@ -60,7 +63,7 @@ def up_scale(array,max_value,stride):
 
 def closest_node(node, nodes):
     nodes = np.asarray(nodes)
-    dist_2 = np.sum((nodes - node)**2, axis=1)
+    dist_2 = np.sqrt(np.sum((nodes - node)**2, axis=1))
     return np.min(dist_2), np.argmin(dist_2)
     
 def regress_centers(Image):
@@ -164,10 +167,7 @@ def convert_instance_to_clusters(path_to_annotations):
                 print('\nTime with vectorization : {}'.format(end-start))
                 plt.imshow(to_rgb(instance_img))
                 plt.show()
-                for i,center in enumerate(centers):
-                    print(i,center)
-                    plt.imshow(instance_img==i)
-                    plt.show()
+
             
                 #clusters_img = calc_clusters_img(up_centroids)
                 #plt.imshow(clusters_img)
@@ -176,6 +176,21 @@ def convert_instance_to_clusters(path_to_annotations):
                 '''
                 np.savez_compressed(os.path.join(root,identifier),centroids)
 
+def get_color(num):
+    return np.random.randint(0, 255, size=(3))
+
+def to_rgb(bw_im):
+    instances = np.unique(bw_im)
+    instances = instances[instances != 0]
+    rgb_im = [np.zeros(bw_im.shape, dtype=int), 
+              np.zeros(bw_im.shape, dtype=int), 
+              np.zeros(bw_im.shape, dtype=int)]
+    for instance in instances:
+        color = get_color(instance)
+        rgb_im[0][instance == bw_im] = color[0]
+        rgb_im[1][instance == bw_im] = color[1]
+        rgb_im[2][instance == bw_im] = color[2]
+    return np.stack([rgb_im[0],rgb_im[1],rgb_im[2]],axis=-1)
 
 
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
