@@ -98,7 +98,6 @@ class Optics():
                 self._update(point_neighbors, point, seeds)
                 # as long as we have unprocessed neighbors...
                 while (seeds):
-                    print(len(seeds))
                     # find the neighbor n with smallest reachability distance
                     seeds.sort(key=lambda n: n.rd)
                     n = seeds.pop(0)

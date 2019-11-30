@@ -108,6 +108,13 @@ cat_labels = [
     Label(  'motorcycle'           , 17 ,       17 , 'vehicle'         , 7       , True         , False        , (  0,  0,230) ),
     Label(  'bicycle'              , 18 ,       18 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) )
     ]
+
+prob_labels = [
+    #       name                     id    trainId   category            catId     hasInstances   ignoreInEval   color
+    
+    Label(  'stuff'                 ,  0 ,        0 , 'flat'            , 1       , False        , False        , (0, 0, 0) ),
+    Label(  'thing'                 ,  1 ,        1 , 'flat'            , 1       , True         , False        , (255,  0,  0) )
+    ]
         
 def get_trainId(id,labels=labels):
     for i, label in enumerate(labels):
@@ -122,7 +129,11 @@ def decode_segmap(image, nc=19, labels =labels):
    
   for l in range(0, nc):
     idx = np.where(image == l)
-    l = get_trainId(l)
+   
+    if nc == 2:
+         l = get_trainId(l,labels=prob_labels)
+    elif nc == 19:
+         l = get_trainId(l)
     r[idx] = labels[l].color[ 0]
     g[idx] = labels[l].color[ 1]
     b[idx] = labels[l].color[ 2]

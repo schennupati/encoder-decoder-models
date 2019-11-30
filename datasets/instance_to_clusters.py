@@ -5,12 +5,14 @@ Created on Tue Aug  6 08:25:54 2019
 
 @author: sumche
 """
-
+from PIL import Image
 import os
 import numpy as np
 import cv2
-import time
 import matplotlib.pyplot as plt
+plt.rcParams['image.cmap'] = 'jet'
+from tqdm import tqdm
+from torchvision import transforms
 #from clusters_to_instances import to_rgb
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
@@ -25,28 +27,24 @@ def get_total_files_count(path,ext='.png'):
 
 annotations_count = get_total_files_count(path_to_annotations,'instanceIds.png')
 
-def convert_centroids(centroids,op='normalize',stride=1,instance_prob=True):
+def convert_centroids(centroids,op='normalize',stride=1):
     
     #converted_centroid_regression = torch.zeros_like(centroids) if tensor else np.zeros_like(centroids)
-        
-    if instance_prob:
-        centroids[:,:,2] = centroids[:,:,2]
-
     if op == 'normalize':
         centroids[:,:,1] = normalize(centroids[:,:,1])
         centroids[:,:,0] = normalize(centroids[:,:,0])
     elif op == 'denormalize':
         centroids[:,:,1] = denormalize(centroids[:,:,1])
         centroids[:,:,0] = denormalize(centroids[:,:,0])
+
     elif op == 'down_scale':
-        centroids[:,:,1] = down_scale(centroids[:,:,1],max_value=1024)
         centroids[:,:,0] = down_scale(centroids[:,:,0],max_value=2048)
+        centroids[:,:,1] = down_scale(centroids[:,:,1],max_value=1024)
     elif op == 'up_scale':
-        centroids[:,:,1] = up_scale(centroids[:,:,1],max_value=1024,stride=stride)
         centroids[:,:,0] = up_scale(centroids[:,:,0],max_value=2048,stride=stride)
+        centroids[:,:,1] = up_scale(centroids[:,:,1],max_value=1024,stride=stride)
     else:
         raise ValueError('Unkown op to convert centroids')
-    
     return centroids  
 
 def normalize(array,max_value=1.0):
@@ -73,44 +71,51 @@ def regress_centers(Image):
     mask = np.zeros_like(Image)
     mask[np.where(Image > 1000)] = 1
 
-    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3])
-    centroid_regression[:, :, 2] = mask
+    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 2])
+    instance_prob = np.zeros([Image.shape[0], Image.shape[1], 1])
+    instance_heatmap = np.zeros([Image.shape[0], Image.shape[1], 1])
+    instance_prob = mask
 
     for instance in instances:
         # step A - get a center (x,y) for each instance
         instance_pixels = np.where(Image == instance)
-        y_c, x_c = int(np.mean(instance_pixels[0])), int(np.mean(instance_pixels[1]))
+        x_c, y_c = int(np.mean(instance_pixels[0])), int(np.mean(instance_pixels[1]))
+        instance_heatmap[x_c, y_c] = 1
         # step B - calculate dist_x, dist_y of each pixel of instance from its center
-        y_dist = (-y_c + instance_pixels[0])
-        x_dist = (-x_c + instance_pixels[1])
-        for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
-            centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
-            
-            
-    centroids = convert_centroids(centroid_regression,op='down_scale')               
-    normalized_centroid_regression = convert_centroids(centroids,op='normalize')
-    #plt.imshow(centroids[:,:,0])
-    #plt.show()
-    #plt.imshow(centroids[:,:,1])
-    #plt.show()
-    #plt.imshow(centroids[:,:,2])
-    #plt.show()
-    #denormalized_centroid_regression = convert_centroids(normalized_centroid_regression,op='denormalize')    
-    return normalized_centroid_regression
+        x_dist = (-x_c + instance_pixels[0])
+        y_dist = (-y_c + instance_pixels[1])
+        for x, y, d_x, d_y in zip(instance_pixels[0], instance_pixels[1], x_dist, y_dist):
+            x_axis = unit_vector([0, 1])
+            instance = unit_vector([x-x_c, y-y_c])
+            angle = (np.arccos(np.clip(np.dot(instance, x_axis), -1.0, 1.0)))/np.pi
+            mag = np.sqrt((x-x_c)**2 + (y-y_c)**2)
+            #centroid_regression[x, y] = [d_y, d_x]
+            centroid_regression[x, y] = [mag, angle]
+      
+    instance_heatmap = cv2.GaussianBlur(instance_heatmap,(9,9),0)
+    instance_heatmap = instance_heatmap / instance_heatmap.max()
+    #centroids = convert_centroids(centroid_regression,op='down_scale')             
+    #normalized_centroid_regression = convert_centroids(centroids,op='normalize') 
+    return centroid_regression, instance_prob, instance_heatmap
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
 
 def get_centers(centroids):
     dx_img, dy_img = centroids[:,:,1], centroids[:,:,0]
     centers = []
     instance_img = np.zeros_like(dx_img)
-    for h, rows in enumerate(zip(dx_img, dy_img)):
+    im_h, im_w, _ = centroids.shape
+    for h, rows in tqdm(enumerate(zip(dx_img, dy_img))):
         dx_row, dy_row = rows[0], rows[1]
         for w, deltas in enumerate(zip(dx_row, dy_row)):
             dx, dy = deltas[0], deltas[1]
-            if dx!=0 and dy!=0:
+            if abs(dx)>0.1 and abs(dy)>0.1:
                 center = (int(w-dx),int(h-dy))
-                if len(centers) !=0:
+                if len(centers) !=0 :
                     closest_distance,closest_center = closest_node(center, centers)
-                    if closest_distance > 10.0:
+                    if closest_distance > im_w/20 :
                         centers.append(center)
                     else: 
                         center = centers[closest_center]
@@ -135,8 +140,8 @@ def get_centers_vectorized(centroids):
     centers_new = np.where(((center_x * center_y) !=0),(center_x,center_y),0)
     instances = np.zeros_like(center_x)
     instance_id = 0
-    for w in np.unique(center_x):
-        for h in np.unique(center_y):
+    for h in tqdm(np.unique(center_y)):
+        for w in np.unique(center_x):
             instance_x = (centers_new[0,:,:]==w).astype(int)
             instance_y = (centers_new[1,:,:]==h).astype(int)
             if np.sum(instance_x*instance_y)!=0 and h*w !=0:
@@ -150,31 +155,35 @@ def convert_instance_to_clusters(path_to_annotations):
         for name in names:
             if name.endswith("instanceIds.png") :
                 identifier = name.split('.')[0]
+                if os.path.exists(os.path.join(root,identifier)+'.npz'):
+                    os.remove(os.path.join(root,identifier)+'.npz')
+                tag = '_'.join(identifier.split('_')[:-1])
+                regression_tag = tag + '_instanceRegression'
+                probability_tag = tag + '_instanceProbs'
+                heatmap_tag = tag + '_instanceHeatmaps'
                 image = cv2.imread(os.path.join(root,name),-1)
-                centroids = regress_centers(image)
-                
-                '''
-                denormalized_centroids = convert_centroids(centroids,op='denormalize')               
-                up_centroids= convert_centroids(denormalized_centroids,op='up_scale')
-                start = time.time()
-                instance_img = get_centers(up_centroids)
-                end = time.time()
-            
-                print('\nTime with two loops: {}'.format(end-start))
-                start = time.time()
-                instance_img = get_centers_vectorized(up_centroids)
-                end = time.time()
-                print('\nTime with vectorization : {}'.format(end-start))
-                plt.imshow(to_rgb(instance_img))
+                centroids, instance_prob, instance_heatmap = regress_centers(image)
+                #denormalized = convert_centroids(centroids,op='denormalize')
+                #centroids  = convert_centroids(denormalized,op='up_scale',stride=4)
+                plt.figure()
+                plt.subplot(221)
+                plt.imshow(centroids[:,:,0])
+                plt.title('x')
+                plt.subplot(222)
+                plt.imshow(centroids[:,:,1])
+                plt.title('y')
+                plt.subplot(223)
+                plt.imshow(instance_prob)
+                plt.title('probs')
+                plt.subplot(224)
+                plt.imshow(instance_heatmap)
+                plt.title('heatmaps')
                 plt.show()
-
-            
-                #clusters_img = calc_clusters_img(up_centroids)
-                #plt.imshow(clusters_img)
-                #plt.show()
+                print(np.unique(centroids[:,:,-1]))
                 break
-                '''
-                np.savez_compressed(os.path.join(root,identifier),centroids)
+                #np.savez_compressed(os.path.join(root,regression_tag),centroids)
+                #np.savez_compressed(os.path.join(root,probability_tag),instance_prob)
+                #np.savez_compressed(os.path.join(root,heatmap_tag),instance_heatmap)
 
 def get_color(num):
     return np.random.randint(0, 255, size=(3))
@@ -192,6 +201,34 @@ def to_rgb(bw_im):
         rgb_im[2][instance == bw_im] = color[2]
     return np.stack([rgb_im[0],rgb_im[1],rgb_im[2]],axis=-1)
 
+annot_path = "/home/sumche/datasets/Cityscapes/gtFine/train/cologne/cologne_000000_000019_gtFine_instanceRegression.npz"
 
+def _load_npz(path):
+    im_array = np.load(path)['arr_0']
+    #zeros = np.zeros(im_array.shape[:-1])
+    #zeros = np.expand_dims(zeros, axis = -1)
+    #im_array = np.concatenate((im_array, zeros), axis = -1)
+    return im_array, Image.fromarray(np.uint8(im_array*255))
+'''
+a, centroids = _load_npz(annot_path)
+to_tensor = transforms.ToTensor()
+resize = transforms.Resize(size=512, interpolation=2)
+to_pil = transforms.ToPILImage()
+#centroids = to_tensor(resize(to_pil((a*255.0).astype(np.uint8))))
+centroids = to_tensor(resize(centroids))
+
+centroids = centroids.permute((1,2,0)).numpy()
+
+centroids = convert_centroids(centroids, op='up_scale',stride=2)
+centroids = convert_centroids(centroids, op='denormalize')
+plt.figure()
+plt.subplot(211)
+plt.imshow(centroids[:,:,0])
+plt.title('x')
+#plt.subplot(212)
+#plt.imshow(centroids[:,:,1])
+#plt.title('y')
+plt.show()
+'''
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')

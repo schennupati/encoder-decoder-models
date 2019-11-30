@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
+import pdb
 
 from utils.im_utils import labels
 from datasets.instance_to_clusters import convert_centroids, get_centers, to_rgb
@@ -45,35 +46,43 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
         
     return torch.tensor(normalized_dep).type(torch.float32)
 
-def convert_targets_instance(targets,permute=(0,2,3,1),instance_prob=True):
+def convert_targets_instance_regression(targets,permute=(0,2,3,1)):
 
     targets = targets.permute(permute)
     #print('Normalized targets:',torch.unique(targets[0,:,:,0]*255.0))
     n, h, w, c = targets.size()
-    stride = 1024/h
-    centroids = torch.zeros((n,h,w,3)) if instance_prob else torch.zeros((n,h,w,2))
+    stride = 1 #1024/h
+    centroids = torch.zeros((n,h,w,c))
     for i in range(n):
-        if not instance_prob:
-            denormalized_centroids = torch.squeeze(targets[i])
-            centroids[i] = convert_centroids(denormalized_centroids, 
-                                             op='up_scale',stride=stride, 
-                                             instance_prob=instance_prob)
-        else:
-            denormalized_centroids = convert_centroids(torch.squeeze(targets[i]),
-                                                                     op='denormalize')
-            centroids[i] = convert_centroids(denormalized_centroids,
-                                             op='up_scale',stride=stride)
-        
+        normalized_centroids = convert_centroids(torch.squeeze(targets[i]), 
+                                                 op='denormalize')
+        centroids[i] = convert_centroids(normalized_centroids, 
+                                         op='up_scale',stride=stride)        
     #print('Denormalized targets:',torch.unique(centroids[0,:,:,0]))
-    return centroids#.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
+    return centroids.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
+
+def convert_targets_instance_probs(targets,permute=(0,2,3,1)):
+    targets = torch.squeeze((targets).permute(permute))
+    new_targets = torch.empty_like(targets)
+    new_targets[torch.where(targets>=0.5)] = 1
+    new_targets[torch.where(targets<0.5)] = 0
+    return new_targets
+
+def convert_targets_instance_heatmaps(targets,permute=(0,2,3,1)):
+    targets = torch.squeeze((targets).permute(permute))
+    return targets/targets.max()
 
 def get_convert_fn(task):
     if task == 'semantic':
         return (convert_targets_semantic)
     elif task == 'disparity':
         return (convert_targets_disparity)
-    elif task == 'instance_cluster':
-        return (convert_targets_instance)
+    elif task == 'instance_regression':
+        return (convert_targets_instance_regression)
+    elif task == 'instance_probs':
+        return (convert_targets_instance_probs)
+    elif task == 'instance_heatmaps':
+        return (convert_targets_instance_heatmaps)
     else:
         return None
 
@@ -86,16 +95,16 @@ def convert_data_type(data,data_type):
         return data.float()
     
 
-def convert_targets(in_targets,cfg):
+def convert_targets(in_targets,cfg,device):
     #cfg['tasks']
     converted_tragets = {} 
     for i,task in enumerate(cfg.keys()):
-        dat_type = cfg[task]['type']
+        data_type = cfg[task]['type']
         convert_fn = get_convert_fn(task)
         targets = in_targets[i] if isinstance(in_targets,list) else in_targets   
         converted_traget = convert_fn(targets) if convert_fn is not None else targets
         
-        converted_tragets[task] = convert_data_type(converted_traget,dat_type)
+        converted_tragets[task] = convert_data_type(converted_traget,data_type).to(device)
             
     return converted_tragets
 
@@ -106,15 +115,12 @@ def convert_outputs(outputs,cfg):
         converted_outputs[task] = outputs[i]
     return converted_outputs
 
-def post_process_outputs(outputs,cfg):
-    #cfg['tasks']
-    #input: converted outputs
+def post_process_outputs(outputs, cfg, targets):
     converted_outputs = {}
     for task in outputs.keys():
         if cfg[task]['postproc'] == 'argmax':
             converted_outputs[task] = torch.argmax(outputs[task],dim=1)
         elif cfg[task]['postproc'] == 'cluster_to_instance':
-            n,h,w,c = outputs[task].size()
             converted_outputs[task] = cluster_to_instance(outputs[task])
         else:
             converted_outputs[task] = outputs[task]
@@ -123,10 +129,9 @@ def post_process_outputs(outputs,cfg):
 def cluster_to_instance(outputs):
     n,c,h,w = outputs.size()
     outputs = outputs.permute(0,2,3,1).cpu().numpy()
-    predictions = np.zeros((n,h,w,3))
+    predictions = np.zeros((n,h,w))
     for i in range(n):
-        predictions[i,:,:,:] = to_rgb(get_centers(outputs[i,:,:,:]))
-
+        predictions[i,:,:] = get_centers(outputs[i,:,:,:])
     return predictions        
 
 def get_class_weights_from_data(loader,num_classes):

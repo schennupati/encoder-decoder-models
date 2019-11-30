@@ -8,10 +8,11 @@ Created on Tue Jul 23 19:55:03 2019
 #Source: https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loss/loss.py
 import torch
 import torch.nn.functional as F
-
+import matplotlib.pyplot as plt
 #from utils.data_utils import up_scale_tensors
 
 def cross_entropy2d(input, target, weight=None, size_average=True):
+    
     n, c, h, w = input.size()
     if len(target.size())==2 and n==1:
         ht, wt = target.size()
@@ -97,14 +98,12 @@ def mse_loss(input, target, weight=None, size_average=True):
     return F.mse_loss(input, target)
 
 def instance_loss(input, target, weight=None, size_average=None):
-    target = target[:,:,:,:-1]
+    #target[target==0] = 0.1
     if input.size() !=target.size():
         input = input.permute(0,2,3,1).squeeze()
-        #input = up_scale_tensors(input)
         target = target.squeeze()
-
-    loss = F.l1_loss(input, target) 
-    return loss
+    non_zeros = torch.nonzero(target.data).size(0)
+    return F.mse_loss(input, target,reduction='mean')#/non_zeros
 
     
     

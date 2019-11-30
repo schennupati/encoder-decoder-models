@@ -15,7 +15,8 @@ from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from models.fcn import FCN 
 from models.fpn import FPN
 from models.vgg import VGGNet
-
+from models.efficientnet import efficientnet_b0, efficientnet_b1
+import pdb
 __all__ = ['FCN']
 
 inplanes_map = {
@@ -30,8 +31,27 @@ inplanes_map = {
                 'vgg':
                       {
                        'vgg16':[512,512,256,128],'vgg19':[512,512,256,128]
+                       },
+                'efficientnet':
+                      {
+                       'efficientnet_b0':[320,112,40,24],'efficientnet_b1':[320,112,40,24]
                        }
                 }
+
+outplanes_map = {
+                'resnet':
+                         {
+                          'fpn':[256,128], 'fcn':[512,256,128,64,32]
+                          },
+                'vgg':
+                      {
+                       'fpn':[256,128], 'fcn':[512,256,128,64,32]
+                       },
+                'efficientnet':
+                      {
+                       'fpn':[128,64], 'fcn':[320,112,40,40,32]
+                       }
+                }                    
                       
     
 decoder_map = {'fcn': (FCN),'fpn':(FPN)}
@@ -48,6 +68,7 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
         if decoder_name == 'fpn':
             encoder    = resnet_fpn_backbone(encoder_name,pretrained=True)
             inplanes   = [256,256,256,256]
+            outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fpn']
             
         elif decoder_name == 'fcn':
@@ -56,32 +77,57 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
                                  replace_stride_with_dilation=[False, False, False])       
             encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
             inplanes = inplanes_map['resnet'][encoder_name]
+            outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fcn']
             
     elif 'vgg' in encoder_name:
         encoder = VGGNet(model=encoder_name, requires_grad=True)
         inplanes = inplanes_map['vgg'][encoder_name]
+        outplanes = outplanes_map['vgg'][decoder_name]
+        if decoder_name =='fpn':
+            decoder_fn = decoder_map['fpn']
+        elif decoder_name =='fcn':
+            decoder_fn = decoder_map['fcn']
     
+    elif 'efficientnet' in encoder_name:
+        if encoder_name == 'efficientnet_b0':
+            encoder = efficientnet_b0(pretrained=True).features
+            return_layers = {'3': 'out_1','5': 'out_2','11': 'out_3','16': 'out_final'}
+            #for name,_ in encoder.named_children():
+                #return_layers[name]=name
+        elif encoder_name == 'efficientnet_b1':
+            encoder = efficientnet_b1(pretrained=True).features
+            #return_layers = {}
+            return_layers = {'5': 'out_1','8': 'out_2','16': 'out_3','23': 'out_final'}
+            #for name,_ in encoder.named_children():
+                #return_layers[name]=name
+        encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
+        inplanes = inplanes_map['efficientnet'][encoder_name]
+        outplanes = outplanes_map['efficientnet'][decoder_name]
         if decoder_name =='fpn':
             decoder_fn = decoder_map['fpn']
         elif decoder_name =='fcn':
             decoder_fn = decoder_map['fcn']
         
+        
+        
     decoders = nn.ModuleList()
     
+    tasks_todo = []
     for task in tasks.keys():
         if tasks[task]['active']:
+            tasks_todo.append(task)
             task_cfg = tasks[task]
-            decoder = decoder_fn(inplanes, 
-                                 task_cfg["out_channels"],
-                                 task_cfg["activation"],
-                                 task_cfg["activate_last"])
+            decoder = decoder_fn(in_planes=inplanes, out_planes= outplanes,
+                                 n_class=task_cfg["out_channels"],
+                                 activation=task_cfg["activation"],
+                                 activate_last=task_cfg["activate_last"])
             decoders.extend([decoder])
 
     model = Encoder_Decoder(encoder, decoders, cfg['model'])
-    
+    #pdb.set_trace()
     return model
-        
+
 
 
 class _Encoder_Decoder(nn.Module):
@@ -97,8 +143,17 @@ class _Encoder_Decoder(nn.Module):
         encoder= self.cfg['encoder']
         decoder= self.cfg['decoder']
         intermediate_result = OrderedDict()
+        
         layers = [k for k,_ in output.items()]
-        layers = layers[:-1] if 'resnet' in encoder and 'fpn' in decoder else layers
+        #for _,out in output.items():
+            #print(_,out.size())
+        #pdb.set_trace()
+        if 'resnet' in encoder and 'fpn' in decoder:
+            layers = layers[:-1]
+        elif 'efficientnet' in encoder and 'fcn' in decoder:
+            layers = layers[1:]
+        else: 
+            layers = layers
         for layer in layers:
             intermediate_result[layer] = output[layer]
         outputs = []

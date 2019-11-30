@@ -4,24 +4,21 @@ from utils.model_uitls import get_activation
 
 class _FPNModel(nn.Module):
 
-    def __init__(self, in_planes =[2048,1024,512], n_class =19,activation='ReLU',activate_last=True):
+    def __init__(self, in_planes =[2048,1024,512], out_planes = [256, 128],
+                 n_class =19,activation='ReLU',activate_last=True):
         super().__init__()
+        self.out_planes = out_planes
         self.n_class = n_class
-        self.out_channels = 128
-        self.upsample1_1  = self.upsample(in_planes[0],256,activation)
-        self.upsample1_2  = self.upsample(256,256,activation)
-        self.upsample1_3  = self.upsample(256,self.out_channels,activation)
-        self.bn1          = nn.BatchNorm2d(self.out_channels)
-        self.upsample2_1  = self.upsample(in_planes[1],256,activation)
-        self.upsample2_2  = self.upsample(256,self.out_channels,activation)
-        self.bn2          = nn.BatchNorm2d(self.out_channels)
-        self.upsample3    = self.upsample(in_planes[2],self.out_channels,activation)
-        self.bn3          = nn.BatchNorm2d(self.out_channels)
-        self.upsample4    = self.upsample(in_planes[3], self.out_channels,activation,
+        self.upsample1_1  = self.upsample(in_planes[0],out_planes[0],activation)
+        self.upsample1_2  = self.upsample(out_planes[0],out_planes[0],activation)
+        self.upsample1_3  = self.upsample(out_planes[0],out_planes[1],activation)
+        self.upsample2_1  = self.upsample(in_planes[1],out_planes[0],activation)
+        self.upsample2_2  = self.upsample(out_planes[0],out_planes[1],activation)
+        self.upsample3    = self.upsample(in_planes[2],out_planes[1],activation)
+        self.upsample4    = self.upsample(in_planes[3], out_planes[1],activation,
                                           upsample=False,kernel_size=3)
-        self.bn4          = nn.BatchNorm2d(self.out_channels)
-        self.upsample5    = self.upsample(self.out_channels,self.n_class,
-                                          activation,activate_last=False, 
+        self.upsample5    = self.upsample(out_planes[1],self.n_class,
+                                          activation,activate_last= activate_last,
                                           upsample=True,kernel_size=1,factor=4)
 
     def forward(self, intermediate_result, layers):
@@ -35,16 +32,12 @@ class _FPNModel(nn.Module):
         #feat1_3 = self.upsample1_1(feat1_2)
         #feat1 = self.bn1(feat1_3)
         feat1 = self.upsample1_3(self.upsample1_2(self.upsample1_1(intermediate_result[layers[-1]])))
-        feat1 = self.bn1(feat1)
         # size=(N, 512, x.H/16, x.W/16)
         feat2 = self.upsample2_2(self.upsample2_1(intermediate_result[layers[-2]]))
-        feat2 = self.bn2(feat2)
         # size=(N, 256, x.H/8, x.W/8)
         feat3 = self.upsample3(intermediate_result[layers[-3]])
-        feat3 = self.bn3(feat3)
         # size=(N, 128, x.H/4, x.W/4)
         feat4 = self.upsample4(intermediate_result[layers[-4]])
-        feat4 = self.bn4(feat4)
         score = feat1 + feat2 + feat3 + feat4
         # size=(N, n_class, x.H/1, x.W/1)
         score = self.upsample5(score)
@@ -57,12 +50,11 @@ class _FPNModel(nn.Module):
         
         layers = []
         layers.append(nn.Conv2d(in_channels, out_channels, kernel_size,padding=int(kernel_size/2)))
+        layers.append(nn.BatchNorm2d(out_channels))
         if activate_last:
             layers.append(get_activation(activation,True))
         if upsample:
-            layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=True))
-            if activate_last:
-                layers.append(get_activation(activation,True))
+            layers.append(nn.Upsample(scale_factor=factor, mode='bilinear', align_corners=False))
         
         return nn.Sequential(*layers)
 

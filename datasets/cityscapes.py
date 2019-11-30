@@ -10,10 +10,9 @@ import os
 import random
 import numpy as np
 from collections import namedtuple
-
+from torchvision import transforms
 from .vision import VisionDataset
 from PIL import Image
-
 class Cityscapes(VisionDataset):
     """`Cityscapes <http://www.cityscapes-dataset.com/>`_ Dataset.
 
@@ -128,8 +127,8 @@ class Cityscapes(VisionDataset):
         if not isinstance(target_type, list):
             self.target_type = [target_type]
 
-        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity','instance_cluster'] for t in self.target_type):
-            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "instance_cluster", "semantic", "polygon"'
+        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity','instance_regression', 'instance_probs', 'instance_heatmaps'] for t in self.target_type):
+            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "instance_regression", "instance_probs", "instance_heatmaps", "semantic", "polygon"'
                              ' or "color"')
 
         if not os.path.isdir(self.images_dir) or not os.path.isdir(self.targets_dir):
@@ -164,8 +163,11 @@ class Cityscapes(VisionDataset):
         for i, t in enumerate(self.target_type):
             if t == 'polygon':
                 target = self._load_json(self.targets[index][i])
-            elif t == 'instance_cluster':
-                target = self._load_npz(self.targets[index][i])
+            elif t in ['instance_regression', 'instance_probs', 'instance_heatmaps'] :
+                if t == 'instance_regression':
+                    target = self._load_npz(self.targets[index][i], upscale=True)
+                else:
+                    target = self._load_npz(self.targets[index][i])
             else:
                 target = Image.open(self.targets[index][i])
 
@@ -178,16 +180,16 @@ class Cityscapes(VisionDataset):
         if self.transform:
             image = self.transform(image)
         
-        random.seed(seed) # apply this seed to target tranfsorms
         n_targets = len(self.target_type)
         if self.target_transform:
             if n_targets == 1:
+                random.seed(seed)
                 target = self.target_transform(target)
             else:
                 targets = []
                 for i in range(n_targets):
+                    random.seed(seed)
                     targets.append(self.target_transform(target[i]))
-                
                 target = targets
 
         return image, target
@@ -204,9 +206,13 @@ class Cityscapes(VisionDataset):
             data = json.load(file)
         return data
     
-    def _load_npz(self,path):
+    def _load_npz(self,path, upscale=True):
         im_array = np.load(path)['arr_0']
-        return Image.fromarray(np.uint8(im_array*255.0))
+        if upscale:
+            im = Image.fromarray(np.uint8(im_array*255.0))
+        else:
+            im = Image.fromarray(np.uint8(im_array))
+        return im
 
     def _get_target_suffix(self, mode, target_type):
         if target_type == 'instance':
@@ -219,6 +225,10 @@ class Cityscapes(VisionDataset):
             return '{}_polygons.json'.format(mode)
         elif target_type == 'disparity':
             return 'disparity.png'
-        elif target_type == 'instance_cluster':
-            return '{}_instanceIds.npz'.format(mode)
+        elif target_type == 'instance_regression':
+            return '{}_instanceRegression.npz'.format(mode)
+        elif target_type == 'instance_probs':
+            return '{}_instanceProbs.npz'.format(mode)
+        elif target_type == 'instance_heatmaps':
+            return '{}_instanceHeatmaps.npz'.format(mode)
 

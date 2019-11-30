@@ -17,10 +17,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
-from utils.data_utils import convert_targets, convert_outputs, post_process_outputs
+from utils.data_utils import (convert_targets, convert_outputs, 
+                              post_process_outputs,convert_targets_instance_regression)
 from utils.metrics import metrics
-from utils.loss_utils import compute_loss, loss_meters
-from utils.im_utils import cat_labels,decode_segmap
+from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss
+from utils.im_utils import cat_labels,prob_labels, decode_segmap
+from PIL import Image
+import matplotlib.pyplot as plt
 
 def get_device(cfg):
     device_str = 'cuda:{}'.format(cfg['params']['gpu_id']) if not cfg['params']['multigpu'] else "cuda:0"
@@ -53,11 +56,14 @@ def get_save_path(cfg,best_loss=None):
 
 def get_writer(cfg):
     base_dir = cfg["model"]["pretrained_path"]
+    savelogs = cfg["params"]["savelogs"]
     _,exp_name,task_name,time_stamp = get_save_path(cfg)
     log_dir = os.path.join(base_dir,'logs',task_name,exp_name,"{}".format(time_stamp))
-    if not os.path.exists(log_dir):
+    if not os.path.exists(log_dir) and savelogs:
         os.makedirs(log_dir)
-    return SummaryWriter(log_dir=log_dir)
+        return SummaryWriter(log_dir=log_dir)
+    else:
+        return None
 
 def get_config_params(cfg):
         
@@ -113,24 +119,33 @@ def load_checkpoint(model,optimizer,base_dir):
     print("Loaded checkpoint '{}' from epoch {} with loss {}".format(checkpoint_name, start_iter, best_loss))
     
     return model,optimizer,start_iter,best_loss
+
+def get_criterion(cfg, weights):
+    loss_fn = cfg['model']['loss_fn']
+    criterion, params = None, None
+    if loss_fn != 'addition':
+        criterion = MultiTaskLoss(cfg['tasks'], weights, loss_fn)
+        params = list(criterion.parameters())
+    return criterion, params
         
-def init_optimizer(model,params):
+def init_optimizer(model, params, criterion, loss_params):
     optimizer_cls = get_optimizer(params['train'])
-    optimizer_params = {k: v for k, v in params['train']["optimizer"].items() if k != "name"}      
-    optimizer = optimizer_cls(model.parameters(), **optimizer_params)
+    optimizer_params = {k: v for k, v in params['train']["optimizer"].items() if k != "name"}
+    if loss_params is not None:      
+        model_params = list(model.parameters()) + loss_params
+    else:
+        model_params = model.parameters()
+    optimizer = optimizer_cls(model_params, **optimizer_params)
     
     return optimizer
 
-def get_model(cfg,device,multigpu=False):
-    #gpus = list(range(torch.cuda.device_count()))
+def get_model(cfg,device):
+    gpus = list(range(torch.cuda.device_count()))
     model = get_encoder_decoder(cfg)
     model = model.to(device)
-    #n = cfg['params']['batchsize']
-    #h = cfg['data']['im_size']
-    #se = SizeEstimator(model, input_size=(n,3,h,2*h))
-    #print(se)
-    #if len(gpus) > 1:
-    #    model = nn.DataParallel(model, device_ids=gpus, dim=0)
+    multigpu = cfg['params']['multigpu']
+    if len(gpus) > 1 and multigpu:
+        model = nn.DataParallel(model, device_ids=gpus, dim=0)
     return model
 
 def get_losses_and_metrics(cfg):
@@ -141,25 +156,37 @@ def get_losses_and_metrics(cfg):
     return train_loss_meters, val_loss_meters, val_metrics
 
 def train_step(model,data,optimizer,cfg,device,weights,running_loss,
-               train_loss_meters,print_interval,n_steps,epoch,step,writer):
+               train_loss_meters, criterion, print_interval, 
+               n_steps,epoch,step,writer):
     
     optimizer.zero_grad()
     inputs,targets = data 
     outputs = model(inputs.to(device))
     outputs = convert_outputs(outputs,cfg['tasks'])
-    targets = convert_targets(targets,cfg['tasks'])
-    losses,loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+    targets = convert_targets(targets,cfg['tasks'],device)
+    if criterion is None:
+        losses, loss = compute_loss(outputs,targets,cfg['tasks'],weights)
+    else:
+        losses, loss = criterion(outputs,targets)
     running_loss.update(loss)
     loss.backward()
     optimizer.step()
     train_loss_meters.update(losses)
     
-    if step % print_interval == 0 or step == n_steps-1:
+    if (step % print_interval == 0 or step == n_steps-1):
+        if criterion is not None:
+            print(list(criterion.parameters()))
+        if writer:
+            writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
+        
         print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, step , running_loss.avg))
-        writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
+        predictions = post_process_outputs(outputs,cfg['tasks'], targets)
         for k, v in train_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
-            writer.add_scalar('Loss/train_{}'.format(k), v.avg, epoch*n_steps + step)
+            if writer:
+                writer.add_scalar('Loss/train_{}'.format(k), v.avg, epoch*n_steps + step)
+                if step == 0:
+                    add_images_to_writer(inputs,outputs,predictions,targets,writer,k,epoch,train=True)
             
     running_loss.reset()
     train_loss_meters.reset()
@@ -167,25 +194,30 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
     return None
     
 def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
-                    val_loss_meters,val_metrics,epoch,writer):
+                    val_loss_meters, criterion, val_metrics,epoch,writer):
     print('\n********************* validation ********************') 
     with torch.no_grad():
         for i,data in tqdm(enumerate(dataloaders['val'])):
             inputs,targets = data 
             outputs = model(inputs.to(device))
             outputs     = convert_outputs(outputs,cfg['tasks'])
-            targets     = convert_targets(targets,cfg['tasks'])
-            val_losses,val_loss = compute_loss(outputs,targets,cfg['tasks'],device,weights)
+            targets     = convert_targets(targets,cfg['tasks'],device)
+            if criterion is None:
+                val_losses, val_loss = compute_loss(outputs,targets,cfg['tasks'],weights)
+            else:
+                val_losses, val_loss = criterion(outputs,targets)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
-            break
+            #break
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
-        writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
-        predictions = post_process_outputs(outputs,cfg['tasks'])
+        if writer:
+            writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
+        predictions = post_process_outputs(outputs,cfg['tasks'], targets)
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
-            writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
-            add_images_to_writer(inputs,outputs,predictions,writer,k,epoch)
+            if writer:
+                writer.add_scalar('Loss/Validation_{}'.format(k), v.avg, epoch)
+                add_images_to_writer(inputs,outputs,predictions,targets,writer,k,epoch)
             
         current_loss = running_val_loss.avg
         running_val_loss.reset()
@@ -241,24 +273,53 @@ def stop_training(patience,plateau_count,early_stop,epoch,state):
         print('Best Checkpoint:')
         return True
             
-def add_images_to_writer(inputs,outputs,predictions,writer,task,epoch):
+def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,train=False):
     
+    state = 'train' if train else 'validation'
     img = inputs[0,:,:,:]
-    writer.add_image('Images/Input_image',img,epoch,dataformats='CHW')
+    writer.add_image('Images/{}_Input_image'.format(state),img,epoch,dataformats='CHW')
+    
     if task == 'semantic':
         img = decode_segmap(predictions[task][0,:,:].cpu())
-        writer.add_image('Images/validation_{}'.format(task),
-                          img,epoch,dataformats='HWC')
-    elif task == 'instance_cluster':
-        x_img = outputs[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        y_img = outputs[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-
-        writer.add_image('Images/validation_{}_dx'.format(task),x_img,epoch)
-        writer.add_image('Images/validation_{}_dy'.format(task),y_img,epoch)
+        target = decode_segmap(targets[task][0,:,:].cpu())
+        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
+        
+        
+    elif task == 'instance_regression':
+        if train:
+            x_img = outputs[task][0,0,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
+            y_img = outputs[task][0,1,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
+        else:
+            x_img = outputs[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+            y_img = outputs[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+            
+        gt_x_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        gt_y_img = targets[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        
+        writer.add_image('Images/gt_{}_{}_dx'.format(state,task),gt_x_img,epoch)
+        writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_y_img,epoch)
+        writer.add_image('Images/det_{}_{}_dx'.format(state,task),x_img,epoch)
+        writer.add_image('Images/det_{}_{}_dy'.format(state,task),y_img,epoch)
+        
+        
+    
+    elif task == 'instance_probs':
+        img = decode_segmap(predictions[task][0,:,:].cpu(),nc=2,labels = prob_labels)
+        target = decode_segmap(targets[task][0,:,:].cpu(),nc=2,labels = prob_labels)
+        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
+        
     
     elif task == 'disparity':
-        img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        writer.add_image('Images/validation_{}'.format(task),img,epoch)
+        if train:
+            img = predictions[task][0,0,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
+        else:
+            img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        gt_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
+        writer.add_image('Images/gt_{}_{}'.format(state,task),gt_img,epoch)
+        writer.add_image('Images/det_{}_{}'.format(state,task),img,epoch)
+        
     
     
 

@@ -15,7 +15,8 @@ from utils.train_utils import get_device, get_config_params, get_model, \
                               init_optimizer, get_losses_and_metrics, \
                               if_checkpoint_exists, load_checkpoint, \
                               train_step, validation_step, print_metrics, \
-                              stop_training,save_model,get_writer
+                              stop_training, save_model, \
+                              get_writer, get_criterion
 
 def train(cfg):
     # Define Configuration parameters
@@ -24,12 +25,13 @@ def train(cfg):
     params, epochs, patience, early_stop, exp_dir, \
     resume_training, print_interval, best_loss, start_iter, \
     plateau_count, state = get_config_params(cfg)
-    writer = get_writer(cfg)
+    writer = get_writer(cfg) 
     
     # Define dataloaders, model, optimizers and metrics
     dataloaders = get_dataloaders(cfg)
     model = get_model(cfg, device)
-    optimizer = init_optimizer(model, params)
+    criterion, loss_params = get_criterion(cfg, weights)
+    optimizer = init_optimizer(model, params, criterion, loss_params)
     train_loss_meters, val_loss_meters, val_metrics = get_losses_and_metrics(cfg)
     
     check_point_exists = if_checkpoint_exists(exp_dir)
@@ -47,13 +49,13 @@ def train(cfg):
         n_steps = len(dataloaders['train'])        
         for step, data in tqdm(enumerate(dataloaders['train'])):
             train_step(model,data,optimizer,cfg,device,weights,
-                       running_loss,train_loss_meters,
+                       running_loss,train_loss_meters, criterion,
                        print_interval,n_steps,epoch,step,writer)
-            break
+            #break
         val_metrics, current_loss = validation_step(model,dataloaders,cfg,device,
                                                     weights,running_val_loss,
-                                                    val_loss_meters,val_metrics,
-                                                    epoch,writer)
+                                                    val_loss_meters,criterion, 
+                                                    val_metrics, epoch,writer)
         print_metrics(val_metrics)
         state,best_loss,plateau_count = save_model(model,optimizer,cfg,current_loss,
                                                    best_loss,plateau_count,
