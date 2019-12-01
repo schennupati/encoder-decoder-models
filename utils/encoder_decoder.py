@@ -8,6 +8,7 @@ Created on Thu Jul 25 20:00:48 2019
 from collections import OrderedDict
 
 from torch import nn
+from torch.nn import functional as F
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models import resnet
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
@@ -110,56 +111,83 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
             decoder_fn = decoder_map['fcn']
         
         
-        
+    ''' 
     decoders = nn.ModuleList()
-    
-    tasks_todo = []
     for task in tasks.keys():
         if tasks[task]['active']:
-            tasks_todo.append(task)
             task_cfg = tasks[task]
             decoder = decoder_fn(in_planes=inplanes, out_planes= outplanes,
                                  n_class=task_cfg["out_channels"],
                                  activation=task_cfg["activation"],
                                  activate_last=task_cfg["activate_last"])
             decoders.extend([decoder])
-
-    model = Encoder_Decoder(encoder, decoders, cfg['model'])
+    '''
+    model = Encoder_Decoder(encoder, decoder_fn, cfg, 
+                            in_planes=inplanes, out_planes= outplanes)
     #pdb.set_trace()
     return model
 
-
+def get_task_cls(in_channels, out_channels, kenrel_size = (1,1)):
+    #pdb.set_trace()
+    return nn.Conv2d(in_channels,out_channels,kenrel_size) 
+            
+def get_intermediate_result(model, output):
+    encoder= model['encoder']
+    decoder= model['decoder']
+    intermediate_result = OrderedDict()
+    layers = [k for k,_ in output.items()]
+    if 'resnet' in encoder and 'fpn' in decoder:
+        layers = layers[:-1]
+    elif 'efficientnet' in encoder and 'fcn' in decoder:
+        layers = layers[1:]
+    else: 
+        layers = layers
+    for layer in layers:
+        intermediate_result[layer] = output[layer]
+    return intermediate_result, layers
 
 class _Encoder_Decoder(nn.Module):
 
-    def __init__(self, encoder, decoders, cfg):
-        super(_Encoder_Decoder,self).__init__()
+    def __init__(self, encoder, base_decoder_fn, cfg, 
+                 in_planes, out_planes):
+        super().__init__()
         self.encoder = encoder
-        self.decoders = decoders
-        self.cfg = cfg
-
-    def forward(self, x):
-        output = self.encoder(x)
-        encoder= self.cfg['encoder']
-        decoder= self.cfg['decoder']
-        intermediate_result = OrderedDict()
+        self.semantic_decoder = base_decoder_fn(in_planes, out_planes)
+        self.instance_decoder = base_decoder_fn(in_planes, out_planes, activation = 'Tanh')
+        self.tasks = cfg['tasks']
+        self.task_cls = {}
+        self.model = cfg['model']
+        self.semantic = get_task_cls(out_planes[-1], 
+                                          self.tasks['semantic']['out_channels'])
+        self.instance_regression = get_task_cls(out_planes[-1], 
+                                          self.tasks['instance_regression']['out_channels'])
+        self.instance_probs = get_task_cls(out_planes[-1], 
+                                          self.tasks['instance_probs']['out_channels'])
         
-        layers = [k for k,_ in output.items()]
-        #for _,out in output.items():
-            #print(_,out.size())
-        #pdb.set_trace()
-        if 'resnet' in encoder and 'fpn' in decoder:
-            layers = layers[:-1]
-        elif 'efficientnet' in encoder and 'fcn' in decoder:
-            layers = layers[1:]
-        else: 
-            layers = layers
-        for layer in layers:
-            intermediate_result[layer] = output[layer]
+    def forward(self, x):
         outputs = []
-
-        for decoder in self.decoders:
-            outputs.append(decoder(intermediate_result,layers))
+        x = self.encoder(x)
+        intermediate_result, layers = get_intermediate_result(self.model, x)
+        seg = self.semantic_decoder(intermediate_result,layers)
+        inst = self.instance_decoder(intermediate_result,layers)
+        if self.tasks['semantic']['active']:
+            out = self.semantic(seg)
+            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
+            outputs.append(out)
+        else:
+            pass
+        if self.tasks['instance_regression']['active']:
+            out = self.instance_regression(inst)
+            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
+            outputs.append(out)
+        else:
+            pass
+        if self.tasks['instance_probs']['active']:
+            out = self.instance_probs(seg)
+            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
+            outputs.append(out)
+        else:
+            pass
         
         return outputs   # size=(N, n_class, x.H/1, x.W/1)
 

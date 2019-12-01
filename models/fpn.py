@@ -17,9 +17,9 @@ class _FPNModel(nn.Module):
         self.upsample3    = self.upsample(in_planes[2],out_planes[1],activation)
         self.upsample4    = self.upsample(in_planes[3], out_planes[1],activation,
                                           upsample=False,kernel_size=3)
-        self.upsample5    = self.upsample(out_planes[1],self.n_class,
-                                          activation,activate_last= activate_last,
-                                          upsample=True,kernel_size=1,factor=4)
+        #self.upsample5    = self.upsample(out_planes[1],self.n_class,
+        #                                  activation,activate_last= activate_last,
+        #                                  upsample=True,kernel_size=1,factor=4)
 
     def forward(self, intermediate_result, layers):
         
@@ -40,7 +40,7 @@ class _FPNModel(nn.Module):
         feat4 = self.upsample4(intermediate_result[layers[-4]])
         score = feat1 + feat2 + feat3 + feat4
         # size=(N, n_class, x.H/1, x.W/1)
-        score = self.upsample5(score)
+        #score = self.upsample5(score)
         #print(score.size())
         
         return score  # size=(N, n_class, x.H/1, x.W/1)

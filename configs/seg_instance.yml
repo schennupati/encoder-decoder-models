@@ -24,7 +24,7 @@ tasks:
         out_channels: 2
         activation: Tanh
         activate_last: False
-        loss: mae_loss
+        loss: instance_loss
         loss_weight: 0.1
         type: float
         metric: None

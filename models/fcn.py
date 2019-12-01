@@ -36,7 +36,7 @@ class _FCNModel(nn.Module):
                                           kernel_size=3, stride=2, padding=1,
                                           dilation=1, output_padding=1)
         self.bn5     = nn.BatchNorm2d(out_planes[4])
-        self.classifier = nn.ConvTranspose2d(out_planes[4], n_class, kernel_size=1)
+        #self.classifier = nn.ConvTranspose2d(out_planes[4], n_class, kernel_size=1)
         
     def forward(self, intermediate_result, layers):
         
@@ -72,7 +72,7 @@ class _FCNModel(nn.Module):
         
         # element-wise add, size=(N, 64, x.H/2, x.W/2)
         score = self.bn5(self.activation(self.deconv5(score)))
-        score = self.classifier(score)
+        #score = self.classifier(score)
         # size=(N, n_class, x.H, x.W)
         return score  # size=(N, n_class, x.H/1, x.W/1)
         
