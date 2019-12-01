@@ -98,11 +98,15 @@ def compute_centroid_vectors(instance_image):
     norm_vecs[:,:,1] = vecs[:,:,1]/mag_2d
     norm_vecs = norm_vecs*mask
     x_axis = unit_vector([0, 1])
+    sign = np.sign(norm_vecs[:,:,0])
     angle = (np.arccos(np.clip((norm_vecs)*x_axis, -1.0, 1.0))/np.pi)[:,:,1]
-    print(np.unique(angle))
+    angle = (angle*sign + 1)*mask[:,:,0]
+    angle /=2
+    mag_2d = mag_2d*mask[:,:,0]
+    print(np.unique(angle), np.unique(mag_2d))
     plt.figure()
     plt.subplot(211)
-    plt.imshow(mag_2d*mask[:,:,0])
+    plt.imshow(mag_2d)
     plt.title('x')
     plt.subplot(212)
     plt.imshow(angle)
