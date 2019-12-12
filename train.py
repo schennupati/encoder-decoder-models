@@ -32,13 +32,14 @@ def train(cfg):
     model = get_model(cfg, device)
     #print(model)
     criterion, loss_params = get_criterion(cfg, weights)
+    criterion = criterion.to(device)
     optimizer = init_optimizer(model, params, criterion, loss_params)
     train_loss_meters, val_loss_meters, val_metrics = get_losses_and_metrics(cfg)
     
     check_point_exists = if_checkpoint_exists(exp_dir)
     if check_point_exists and resume_training:
-        model,optimizer,start_iter,best_loss = load_checkpoint(model,optimizer,
-                                                               exp_dir)
+        model,optimizer,criterion, start_iter,best_loss = load_checkpoint(model,optimizer,
+                                                               criterion, exp_dir)
     else:
         print("Begining Training from Scratch")
                     
@@ -58,7 +59,7 @@ def train(cfg):
                                                     val_loss_meters,criterion, 
                                                     val_metrics, epoch,writer)
         print_metrics(val_metrics)
-        state,best_loss,plateau_count = save_model(model,optimizer,cfg,current_loss,
+        state,best_loss,plateau_count = save_model(model,optimizer,criterion,cfg,current_loss,
                                                    best_loss,plateau_count,
                                                    start_iter,epoch,state)             
         if stop_training(patience,plateau_count,early_stop,epoch,state):
@@ -68,7 +69,7 @@ def train(cfg):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="config")
     parser.add_argument("--config", nargs="?", 
-                        type=str, default="configs/base.yml", 
+                        type=str, default="configs/seg_instance.yml", 
                         help="Configuration to use")
     args = parser.parse_args()    
     cfg = get_cfg(args.config)

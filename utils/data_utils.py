@@ -9,7 +9,7 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
-from utils.im_utils import labels
+from utils.im_utils import labels, prob_labels
 import pdb
 import matplotlib.pyplot as plt
 
@@ -47,8 +47,13 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
 
 def convert_targets_instance(targets,permute=(0,2,3,1)):
         
-    targets = torch.squeeze((targets).permute(permute))
-    n,h,w = targets.size()
+    targets = torch.squeeze((targets).permute(permute)) 
+    if len(targets.size()) > 2: 
+        n,h,w = targets.size()
+    elif len(targets.size()) == 2:
+        h, w = targets.size()
+        n = 1
+        targets = targets.unsqueeze(0)
     vecs = torch.zeros((n,2,h,w))
     masks = torch.zeros((n,h,w))
     heatmaps = torch.zeros((n,h,w))
@@ -56,7 +61,7 @@ def convert_targets_instance(targets,permute=(0,2,3,1)):
     for i in range(n):    
         reg, mask, heatmap = compute_centroid_vector_torch(targets[i,:,:].float())
         vecs[i,:,:,:] = reg.float()
-        masks[i,:,:] = mask.float()
+        masks[i,:,:] = mask.long()
         heatmaps[i,:,:] = heatmap.float()
     
     converted_targets = {'instance_regression': vecs,
@@ -175,7 +180,7 @@ def cityscapes_semantic_weights(num_classes):
 
 def get_weights(cfg,device):
     dataset = cfg['data']['dataset']
-    tasks = cfg['tasks']
+    tasks = cfg['model']['outputs']
     weights = {}
     for task in tasks.keys():
         if dataset == 'Cityscapes' and task == 'semantic':
@@ -223,12 +228,12 @@ def compute_centroid_vector_torch(instance_image):
     if len(mask.size()) > 1:
         mask = mask.int()
     elif mask is False:
-        mask = np.zeros(instance_image.shape, dtype=np.uint8)
+        mask = np.zeros(instance_image.shape)
     else:
-        mask = np.ones(instance_image.shape, dtype=np.uint8)
-    vecs[:,:,0] = vecs[:,:,0]*mask
-    vecs[:,:,1] = vecs[:,:,1]*mask
-    heatmap_t = heatmap_t*mask
+        mask = np.ones(instance_image.shape)
+    vecs[:,:,0] = vecs[:,:,0]*mask.float()
+    vecs[:,:,1] = vecs[:,:,1]*mask.float()
+    heatmap_t = heatmap_t*mask.float()
     
     return vecs.permute(2,0,1), mask, heatmap_t
 

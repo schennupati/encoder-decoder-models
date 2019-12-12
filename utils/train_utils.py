@@ -109,23 +109,23 @@ def if_checkpoint_exists(exp_dir):
     else:
         return False
 
-def load_checkpoint(model,optimizer,base_dir):
+def load_checkpoint(model,optimizer,criterion,base_dir):
     ###### load pre trained models ######
     checkpoint_name,checkpoint = get_checkpoint(base_dir)
     model.load_state_dict(checkpoint["model_state"])
     optimizer.load_state_dict(checkpoint["optimizer_state"])
+    criterion.load_state_dict(checkpoint["criterion_state"])
     start_iter = checkpoint["epoch"]
     best_loss = checkpoint['best_loss']
     print("Loaded checkpoint '{}' from epoch {} with loss {}".format(checkpoint_name, start_iter, best_loss))
     
-    return model,optimizer,start_iter,best_loss
+    return model,optimizer,criterion,start_iter,best_loss
 
 def get_criterion(cfg, weights):
     loss_fn = cfg['model']['loss_fn']
     criterion, params = None, None
-    if loss_fn != 'addition':
-        criterion = MultiTaskLoss(cfg['tasks'], weights, loss_fn)
-        params = list(criterion.parameters())
+    criterion = MultiTaskLoss(cfg['model']['outputs'], weights, loss_fn)
+    params = list(criterion.parameters())
     return criterion, params
         
 def init_optimizer(model, params, criterion, loss_params):
@@ -149,9 +149,9 @@ def get_model(cfg,device):
     return model
 
 def get_losses_and_metrics(cfg):
-    train_loss_meters = loss_meters(cfg['tasks'])
-    val_loss_meters   = loss_meters(cfg['tasks'])
-    val_metrics       = metrics(cfg['tasks']) 
+    train_loss_meters = loss_meters(cfg['model']['outputs'])
+    val_loss_meters   = loss_meters(cfg['model']['outputs'])
+    val_metrics       = metrics(cfg['model']['outputs']) 
     
     return train_loss_meters, val_loss_meters, val_metrics
 
@@ -162,32 +162,29 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
     optimizer.zero_grad()
     inputs,targets = data 
     outputs = model(inputs.to(device))
-    #outputs = convert_outputs(outputs,cfg['tasks'])
     targets = convert_targets(targets,cfg['tasks'],device)
-    if criterion is None:
-        losses, loss = compute_loss(outputs,targets,cfg['tasks'],weights)
-    else:
-        losses, loss = criterion(outputs,targets)
+    losses, loss = criterion(outputs,targets)
+    #pdb.set_trace()
     running_loss.update(loss)
     loss.backward()
     optimizer.step()
     train_loss_meters.update(losses)
     
     if (step % print_interval == 0 or step == n_steps-1):
-        if criterion is not None:
-            print(list(criterion.parameters()))
+        loss_weights = [p.data for p in criterion.parameters()]
+        print('\nLoss weights {}'.format(loss_weights))
         if writer:
             writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
+        loss_str = "epoch: {} batch: {} loss: {}".format(epoch + 1, step , running_loss.avg)
+        predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
         
-        print("\nepoch: {} batch: {} loss: {}".format(epoch + 1, step , running_loss.avg))
-        predictions = post_process_outputs(outputs,cfg['tasks'], targets)
         for k, v in train_loss_meters.meters.items():
-            print("{} loss: {}".format(k, v.avg))
+            loss_str += " {}_loss: {}".format(k, v.avg)
             if writer:
                 writer.add_scalar('Loss/train_{}'.format(k), v.avg, epoch*n_steps + step)
                 if step == 0:
                     add_images_to_writer(inputs,outputs,predictions,targets,writer,k,epoch,train=True)
-            
+        print(loss_str)
     running_loss.reset()
     train_loss_meters.reset()
     
@@ -200,19 +197,16 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         for i,data in tqdm(enumerate(dataloaders['val'])):
             inputs,targets = data 
             outputs = model(inputs.to(device))
-            #outputs     = convert_outputs(outputs,cfg['tasks'])
             targets     = convert_targets(targets,cfg['tasks'],device)
-            if criterion is None:
-                val_losses, val_loss = compute_loss(outputs,targets,cfg['tasks'],weights)
-            else:
-                val_losses, val_loss = criterion(outputs,targets)
+            #pdb.set_trace()
+            val_losses, val_loss = criterion(outputs,targets)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
             #break
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
         if writer:
             writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
-        predictions = post_process_outputs(outputs,cfg['tasks'], targets)
+        predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
             if writer:
@@ -238,10 +232,11 @@ def print_metrics(val_metrics):
                     [print(cat_labels[k].name,'\t :',v) for k,v in class_iou.items() ]
     val_metrics.reset()
 
-def save_model(model,optimizer,cfg,current_loss,best_loss,plateau_count,start_iter,epoch,state):
+def save_model(model,optimizer,criterion,cfg,current_loss,best_loss,plateau_count,start_iter,epoch,state):
     if current_loss <= best_loss:
         best_loss = current_loss
         state = {"epoch": start_iter + epoch + 1,"model_state": model.state_dict(),
+                 "criterion_state":criterion.state_dict(),
                  "optimizer_state": optimizer.state_dict(),"best_loss": best_loss}
         save_path,_,_,time_stamp = get_save_path(cfg,best_loss)
         torch.save(state, save_path)
@@ -285,8 +280,7 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
         writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
         
-        
-    elif task == 'instance':
+    elif task == 'instance_regression':
         
         if train:
             x_img = outputs[task][0,0,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
@@ -301,14 +295,15 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_y_img,epoch)
         writer.add_image('Images/det_{}_{}_dx'.format(state,task),x_img,epoch)
         writer.add_image('Images/det_{}_{}_dy'.format(state,task),y_img,epoch)
-        
-        
-    
+            
     elif task == 'instance_probs':
-        img = decode_segmap(predictions[task][0,:,:].cpu(),nc=2,labels = prob_labels)
+        if train:
+            img = decode_segmap(predictions[task][0,:,:].detach().cpu(),nc=2,labels = prob_labels)
+        else:
+            img = decode_segmap(predictions[task][0,:,:].cpu(),nc=2,labels = prob_labels)
         target = decode_segmap(targets[task][0,:,:].cpu(),nc=2,labels = prob_labels)
-        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
+        writer.add_image('Images/gt_{}_{}_probs'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/det_{}_{}_probs'.format(state,task), img,epoch,dataformats='HWC')
         
     
     elif task == 'disparity':

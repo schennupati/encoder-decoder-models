@@ -7,6 +7,7 @@ Created on Tue Jul 30 13:40:49 2019
 """
 import torch
 import torch.nn as nn
+import pdb
 #TODO:Implement MTL loss combinations
 from utils.loss import (cross_entropy2d,bootstrapped_cross_entropy2d,
                         multi_scale_cross_entropy2d,huber_loss,mae_loss,
@@ -21,7 +22,6 @@ loss_map = {
             'mse_loss' : (mse_loss),
             'instance_loss': (instance_loss)
             }
-
 def get_loss_fn(loss_type):
     return loss_map[loss_type] if loss_type in loss_map.keys() else None
     
@@ -47,7 +47,7 @@ def compute_loss(predictions,targets,cfg,weights=None):
     return losses,out_loss
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self, cfg,weights=None, loss_fn='equal'):
+    def __init__(self, cfg, weights=None, loss_type='fixed'):
         super(MultiTaskLoss, self).__init__()
         self.losses = {}
         self.cfg = cfg
@@ -55,36 +55,37 @@ class MultiTaskLoss(nn.Module):
         self.tasks = list(self.cfg.keys())
         self.n = len(self.tasks)
         self.sigma = nn.Parameter(torch.ones(self.n))
-        self.loss_fn = loss_fn
+        self.loss_type = loss_type
 
     def forward(self, predictions, targets):
+        
         for task in self.tasks:
-            prediction = predictions[task]
-            target     = targets[task]
-            weight = self.weights[task] if self.weights is not None else None
-            loss_type  = self.cfg[task]['loss']
-            self.losses[task] = compute_task_loss(prediction, 
-                       target,weight,loss_type)
-        l = [loss for loss in self.losses.values()]
-        if self.loss_fn == 'log_uncertainity':
-            l = self.log_uncertainity(l)
-        elif self.loss_fn == 'exp_uncertainity':
-            l = self.exp_uncertainity(l)
-        elif self.loss_fn == 'equal':
-            l = torch.Tensor(l)*nn.Parameter(torch.ones(self.n))
-            l = l.sum()            
-        return self.losses, l
+            if self.cfg[task]['active']:
+                prediction = predictions[task]
+                target = targets[task]
+                weight = self.weights[task]
+                loss_fn  = self.cfg[task]['loss']
+                self.losses[task] = compute_task_loss(prediction, 
+                                                      target, weight, loss_fn)
+
+        device = self.losses[task].get_device()
+        self.sigma.to(device)
+        total_loss =  self.compute_total_loss()
+        return self.losses, total_loss
     
-    def log_uncertainity(self, l):
-        l = 0.5 * (torch.Tensor(l) / self.sigma**2)
-        l = l.sum() + torch.log(self.sigma.prod())
-        return l
-    
-    def exp_uncertainity(self, l):
-        eta = torch.log(self.sigma)
-        l = (1.0/self.n) * (torch.Tensor(l)*torch.exp(-1.0*eta) + eta)
-        l = l.sum()
-        return l
+    def compute_total_loss(self):
+        loss = 0.0
+        if self.loss_type == 'fixed':
+            for task in self.losses.keys():
+                loss += self.losses[task]*self.cfg[task]['loss_weight']
+
+        elif self.loss_type == 'uncertainty':
+            for i, task in enumerate(self.losses.keys()):
+                if self.cfg[task]['loss'] == 'cross_entropy2d':
+                    loss += torch.exp(-self.sigma[i])*self.losses[task] + 0.5*self.sigma[i]
+                elif self.cfg[task]['loss'] == 'instance_loss':
+                    loss += 0.5*(torch.exp(-self.sigma[i])*self.losses[task] + self.sigma[i])
+        return loss
 
 class averageMeter(object):
     """Computes and stores the average and current value"""

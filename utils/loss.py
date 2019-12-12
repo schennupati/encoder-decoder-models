@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 #from utils.data_utils import up_scale_tensors
 
 def cross_entropy2d(input, target, weight=None, size_average=True):
-    
+    target = target.long()
     n, c, h, w = input.size()
     if len(target.size())==2 and n==1:
         ht, wt = target.size()
