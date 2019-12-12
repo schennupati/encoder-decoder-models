@@ -97,12 +97,11 @@ def mse_loss(input, target, weight=None, size_average=True):
         input = input.permute(0,2,3,1).squeeze()
     return F.mse_loss(input, target)
 
-def instance_loss(input, target, weight=None, size_average=None):
+def instance_loss(input, target, weight=None, size_average=True):
     #target[target==0] = 0.1
     if input.size() !=target.size():
         input = input.permute(0,2,3,1).squeeze()
         target = target.squeeze()
-    non_zeros = torch.nonzero(target.data).size(0)
     return F.l1_loss(input, target,reduction='mean')#/non_zeros
 
     

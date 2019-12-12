@@ -4,13 +4,16 @@ model:
     decoder: fpn
     pretrained_path: /home/sumche/results
     loss_fn: addition # log_uncertainity, exp_uncertainity or addition
+    outputs: 
+        semantic: True 
+        instance_regression: False
+        instance_heatmap: False
+        instance_probs: False
 
 tasks:
     semantic:
         active: True
         out_channels: 19
-        activation: ReLU
-        activate_last: True
         loss: cross_entropy2d
         loss_weight: 1.0
         type: long
@@ -19,8 +22,6 @@ tasks:
     instance:
         active: True
         out_channels: 2
-        activation: Tanh
-        activate_last: False
         loss: instance_loss
         loss_weight: 1.0
         type: float
@@ -29,8 +30,6 @@ tasks:
     disparity:
         active: False
         out_channels: 1
-        activation: ReLU
-        activate_last: True
         loss: mae_loss
         loss_weight: 1.0
         type: float

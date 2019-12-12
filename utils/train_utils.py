@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
 from utils.data_utils import (convert_targets, convert_outputs, 
-                              post_process_outputs,convert_targets_instance_regression)
+                              post_process_outputs)
 from utils.metrics import metrics
 from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss
 from utils.im_utils import cat_labels,prob_labels, decode_segmap
@@ -162,7 +162,7 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
     optimizer.zero_grad()
     inputs,targets = data 
     outputs = model(inputs.to(device))
-    outputs = convert_outputs(outputs,cfg['tasks'])
+    #outputs = convert_outputs(outputs,cfg['tasks'])
     targets = convert_targets(targets,cfg['tasks'],device)
     if criterion is None:
         losses, loss = compute_loss(outputs,targets,cfg['tasks'],weights)
@@ -200,7 +200,7 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         for i,data in tqdm(enumerate(dataloaders['val'])):
             inputs,targets = data 
             outputs = model(inputs.to(device))
-            outputs     = convert_outputs(outputs,cfg['tasks'])
+            #outputs     = convert_outputs(outputs,cfg['tasks'])
             targets     = convert_targets(targets,cfg['tasks'],device)
             if criterion is None:
                 val_losses, val_loss = compute_loss(outputs,targets,cfg['tasks'],weights)

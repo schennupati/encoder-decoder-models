@@ -129,10 +129,9 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     #pdb.set_trace()
     return model
 
-def get_task_cls(in_channels, out_channels, activation, kenrel_size = (1,1)):
+def get_task_cls(in_channels, out_channels, kenrel_size = (1,1)):
     #pdb.set_trace()
-    return nn.Sequential(nn.Conv2d(in_channels,out_channels,kenrel_size),
-                         get_activation(activation,inplace=True))
+    return nn.Sequential(nn.Conv2d(in_channels,out_channels,kenrel_size))
             
 def get_intermediate_result(model, output):
     encoder= model['encoder']
@@ -155,47 +154,48 @@ class _Encoder_Decoder(nn.Module):
                  in_planes, out_planes):
         super().__init__()
         self.encoder = encoder
-        self.semantic_decoder = base_decoder_fn(in_planes, out_planes)
+        self.base_decoder = base_decoder_fn(in_planes, out_planes)
         #self.instance_decoder = base_decoder_fn(in_planes, out_planes, activation = 'Tanh')
         self.tasks = cfg['tasks']
         self.task_cls = {}
         self.model = cfg['model']
         self.semantic = get_task_cls(out_planes[-1], 
-                                          self.tasks['semantic']['out_channels'],
-                                          self.tasks['semantic']['activation'])
+                                          self.tasks['semantic']['out_channels'])
         self.instance_regression = get_task_cls(out_planes[-1], 
-                                          self.tasks['instance']['out_channels'],
-                                          self.tasks['instance']['activation'])
+                                          self.tasks['instance']['out_channels'])
+        self.instance_heatmap = get_task_cls(out_planes[-1], 1)
+        self.instance_probs = get_task_cls(out_planes[-1], 1)
         #self.instance_probs = get_task_cls(out_planes[-1], 
         #                                  self.tasks['instance_probs']['out_channels'])
         
     def forward(self, x):
-        outputs = []
+        outputs = {}
         x = self.encoder(x)
         intermediate_result, layers = get_intermediate_result(self.model, x)
-        seg = self.semantic_decoder(intermediate_result,layers)
-        #inst = self.instance_decoder(intermediate_result,layers)
-        if self.tasks['semantic']['active']:
-            out = self.semantic(seg)
+        feat = self.base_decoder(intermediate_result,layers)
+        if self.model['outputs']['semantic']:
+            out = self.semantic(feat)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
-            outputs.append(out)
+            outputs['semantic'] = out
         else:
             pass
-        if self.tasks['instance']['active']:
-            out = self.instance_regression(seg)
-            #out = self.instance_regression(inst)
+        if self.model['outputs']['instance_regression']:
+            out = self.instance_regression(feat)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
-            outputs.append(out)
+            outputs['instance_regression'] = out
+            
+        if self.model['outputs']['instance_heatmap']:
+            out = self.instance_heatmap(feat)
+            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
+            outputs['instance_heatmap'] = out
+        
+        if self.model['outputs']['instance_probs']:
+            out = self.instance_probs(feat)
+            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
+            outputs['instance_probs'] = out 
         else:
             pass
-        '''
-        if self.tasks['instance_probs']['active']:
-            out = self.instance_probs(seg)
-            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
-            outputs.append(out)
-        else:
-            pass
-        '''
+
         return outputs   # size=(N, n_class, x.H/1, x.W/1)
 
 

@@ -9,10 +9,9 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
-import pdb
-
 from utils.im_utils import labels
-from datasets.instance_to_clusters import convert_centroids, get_centers, to_rgb
+import pdb
+import matplotlib.pyplot as plt
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -46,52 +45,30 @@ def convert_targets_disparity(targets,permute=(0,2,3,1)):
         
     return torch.tensor(normalized_dep).type(torch.float32)
 
-def convert_targets_instance_regression(targets,permute=(0,2,3,1)):
-
-    targets = targets.permute(permute)
-    #print('Normalized targets:',torch.unique(targets[0,:,:,0]*255.0))
-    n, h, w, c = targets.size()
-    stride = 1 #1024/h
-    centroids = torch.zeros((n,h,w,c))
-    for i in range(n):
-        normalized_centroids = convert_centroids(torch.squeeze(targets[i]), 
-                                                 op='denormalize')
-        centroids[i] = convert_centroids(normalized_centroids, 
-                                         op='up_scale',stride=stride)        
-    #print('Denormalized targets:',torch.unique(centroids[0,:,:,0]))
-    return centroids.permute(0,3,1,2)#torch.squeeze((targets).permute(permute))
-
-def convert_targets_instance_probs(targets,permute=(0,2,3,1)):
-    targets = torch.squeeze((targets).permute(permute))
-    new_targets = torch.empty_like(targets)
-    new_targets[torch.where(targets>=0.5)] = 1
-    new_targets[torch.where(targets<0.5)] = 0
-    return new_targets
-
-def convert_targets_instance(targets,permute=(0,2,3,1)):    
+def convert_targets_instance(targets,permute=(0,2,3,1)):
+        
     targets = torch.squeeze((targets).permute(permute))
     n,h,w = targets.size()
-    vecs = torch.zeros((n,h,w,2))
-    #mask = torch.zeros_like(targets)
+    vecs = torch.zeros((n,2,h,w))
+    masks = torch.zeros((n,h,w))
+    heatmaps = torch.zeros((n,h,w))
+    
     for i in range(n):    
-        vecs[i,:,:,:] = compute_centroid_vector_torch(targets[i,:,:].float())
-    return vecs.permute(0,3,1,2)
-
-def convert_targets_instance_heatmaps(targets,permute=(0,2,3,1)):
-    targets = torch.squeeze((targets).permute(permute))
-    return targets/targets.max()
+        reg, mask, heatmap = compute_centroid_vector_torch(targets[i,:,:].float())
+        vecs[i,:,:,:] = reg.float()
+        masks[i,:,:] = mask.float()
+        heatmaps[i,:,:] = heatmap.float()
+    
+    converted_targets = {'instance_regression': vecs,
+                         'instance_probs': masks,
+                         'instance_heatmap':heatmaps}    
+    return converted_targets
 
 def get_convert_fn(task):
     if task == 'semantic':
         return (convert_targets_semantic)
     elif task == 'disparity':
         return (convert_targets_disparity)
-    elif task == 'instance_regression':
-        return (convert_targets_instance_regression)
-    elif task == 'instance_probs':
-        return (convert_targets_instance_probs)
-    elif task == 'instance_heatmaps':
-        return (convert_targets_instance_heatmaps)
     elif task == 'instance':
         return (convert_targets_instance)
     else:
@@ -108,16 +85,21 @@ def convert_data_type(data,data_type):
 
 def convert_targets(in_targets,cfg,device):
     #cfg['tasks']
-    converted_tragets = {} 
+    converted_targets = {} 
     for i,task in enumerate(cfg.keys()):
         data_type = cfg[task]['type']
         convert_fn = get_convert_fn(task)
-        targets = in_targets[i] if isinstance(in_targets,list) else in_targets   
-        converted_traget = convert_fn(targets) if convert_fn is not None else targets
-        
-        converted_tragets[task] = convert_data_type(converted_traget,data_type).to(device)
+        targets = in_targets[i] if isinstance(in_targets,list) else in_targets
+        if task != 'instance':
+            converted_target = convert_fn(targets) if convert_fn is not None else targets
+            converted_targets[task] = convert_data_type(converted_target,data_type).to(device)
+        else:
+            dict_targets = convert_fn(targets)
+            for task in dict_targets.keys():
+                dict_targets[task] = dict_targets[task].to(device)
+            converted_targets.update(dict_targets)
             
-    return converted_tragets
+    return converted_targets
 
 def convert_outputs(outputs,cfg):
     #cfg['tasks']
@@ -131,19 +113,9 @@ def post_process_outputs(outputs, cfg, targets):
     for task in outputs.keys():
         if cfg[task]['postproc'] == 'argmax':
             converted_outputs[task] = torch.argmax(outputs[task],dim=1)
-        elif cfg[task]['postproc'] == 'cluster_to_instance':
-            converted_outputs[task] = cluster_to_instance(outputs[task])
         else:
             converted_outputs[task] = outputs[task]
-    return converted_outputs
-
-def cluster_to_instance(outputs):
-    n,c,h,w = outputs.size()
-    outputs = outputs.permute(0,2,3,1).cpu().numpy()
-    predictions = np.zeros((n,h,w))
-    for i in range(n):
-        predictions[i,:,:] = get_centers(outputs[i,:,:,:])
-    return predictions        
+    return converted_outputs   
 
 def get_class_weights_from_data(loader,num_classes):
     trainId_to_count = {}
@@ -214,54 +186,39 @@ def get_weights(cfg,device):
     
     return weights
 
-def up_scale_tensors(tensor):
-    n,h,w,c = tensor.size()
-    stride = 1024/h
-    if len(tensor.shape)==4:
-        tensor_x = tensor[:,:,:,1]*1024/stride
-        tensor_y = tensor[:,:,:,0]*2048/stride
-        
-    elif len(tensor.shape)==3:
-        tensor_x = tensor[:,:,:,1]*1024/stride
-        tensor_y = tensor[:,:,:,0]*2048/stride
-    
-    return torch.stack((tensor_x,tensor_y),-1)
+def get_2d_bbox_from_instance(xs, ys):
+    vertex_1 = (torch.min(xs), torch.min(ys))
+    vertex_2 = (torch.max(xs), torch.max(ys))
+    return vertex_1, vertex_2
 
-def regress_centers(Image):
-    instances = np.unique(Image)
-    instances = instances[instances > 1000]
-
-    mask = np.zeros_like(Image)
-    mask[np.where(Image > 1000)] = 1
-
-    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 3])
-    centroid_regression[:, :, 2] = mask
-
-    for instance in instances:
-        # step A - get a center (x,y) for each instance
-        instance_pixels = np.where(Image == instance)
-        y_c, x_c = np.mean(instance_pixels[0]), np.mean(instance_pixels[1])
-        # step B - calculate dist_x, dist_y of each pixel of instance from its center
-        y_dist = (-y_c + instance_pixels[0])
-        x_dist = (-x_c + instance_pixels[1])
-        for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
-            centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
-    return centroid_regression
+def get_instance_hw(xs, ys):
+    vertex_1, vertex_2 = get_2d_bbox_from_instance(xs, ys)
+    return (abs(vertex_1[0]-vertex_2[0]), abs(vertex_1[1]-vertex_2[1]))
 
 def compute_centroid_vector_torch(instance_image):
-    #start = timer()
+    alpha = 2.0
     instance_image_tensor = torch.Tensor(instance_image)
     centroids_t = torch.zeros(instance_image.shape + (2,))
+    heatmap_t = torch.ones(instance_image.shape + (2,))
     for value in torch.unique(instance_image_tensor):
         xsys = torch.nonzero(instance_image_tensor == value)
         xs, ys = xsys[:, 0], xsys[:, 1]
         centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()), torch.mean(ys.float())))
+        if value > 1000:
+            #pdb.set_trace()
+            w, h = get_instance_hw(xs, ys)
+            heatmap_t[xs, ys,0], heatmap_t[xs, ys,1]  = w.float(), h.float()
 
     coordinates = torch.zeros(instance_image.shape + (2,))
     g1, g2 = torch.meshgrid(torch.arange(instance_image_tensor.size()[0]), torch.arange(instance_image_tensor.size()[1]))
     coordinates[:, :, 0] = g1
     coordinates[:, :, 1] = g2
     vecs = centroids_t - coordinates
+    
+    heatmap_ = heatmap_t - torch.abs(vecs)*alpha
+    heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
+    heatmap_ = heatmap_/heatmap_t
+    heatmap_t = heatmap_[:,:,0]*heatmap_[:,:,1]
     mask = instance_image_tensor >= 1000
     if len(mask.size()) > 1:
         mask = mask.int()
@@ -271,8 +228,9 @@ def compute_centroid_vector_torch(instance_image):
         mask = np.ones(instance_image.shape, dtype=np.uint8)
     vecs[:,:,0] = vecs[:,:,0]*mask
     vecs[:,:,1] = vecs[:,:,1]*mask
-    #print('centroids torch', timer() - start)
-    return vecs#, mask[:,:,0]
+    heatmap_t = heatmap_t*mask
+    
+    return vecs.permute(2,0,1), mask, heatmap_t
 
 def get_cfg(config):
     with open(config) as fp:

@@ -11,9 +11,6 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 plt.rcParams['image.cmap'] = 'jet'
-from tqdm import tqdm
-from torchvision import transforms
-#from clusters_to_instances import to_rgb
 path_to_annotations = '/home/sumche/datasets/Cityscapes/gtFine/val'
 
 
@@ -65,21 +62,34 @@ def closest_node(node, nodes):
     return np.min(dist_2), np.argmin(dist_2)
 
 def get_2d_box_from_instance(xs, ys):
-    vetex_1 = (np.min(xs), np.min(ys))
-    vetex_2 = (np.max(xs), np.max(ys))
-    return vetex_1, vetex_2
+    vertex_1 = (np.min(xs), np.min(ys))
+    vertex_2 = (np.max(xs), np.max(ys))
+    return vertex_1, vertex_2
 
 def get_2d_box_center(xs, ys):
-    vetex_1, vetex_2 = get_2d_box_from_instance(xs, ys)
-    return (int((vetex_1[0]+vetex_2[0])/2),int((vetex_1[1]+vetex_2[1])/2))
+    vertex_1, vertex_2 = get_2d_box_from_instance(xs, ys)
+    return (int((vertex_1[0]+vertex_2[0])/2),int((vertex_1[1]+vertex_2[1])/2))
+
+def get_instance_hw(xs, ys):
+    vertex_1, vertex_2 = get_2d_box_from_instance(xs, ys)
+    return (abs(vertex_1[0]-vertex_2[0]), abs(vertex_1[1]-vertex_2[1]))
 
 def compute_centroid_vectors(instance_image):
+    alpha = 2.0
     centroids = np.zeros(instance_image.shape + (2,))
-    img = np.zeros(instance_image.shape + (3,))
+    heatmap = np.ones(instance_image.shape + (2,) )
+    #img = np.zeros(instance_image.shape + (3,))
     for value in np.unique(instance_image):
         xs, ys = np.where(instance_image == value)
-        #if value>1000:
-        #    center_coordinates = (int(np.mean(ys)), int(np.mean(xs)))
+        if value>1000:
+            w, h = get_instance_hw(xs, ys)
+            heatmap[xs, ys] = np.array(w,h)
+            #alpha_h, alpha_w = int(h*alpha), int(w*alpha)
+            #if alpha_h%2 == 0:
+            #    alpha_h -= 1
+            #if alpha_w%2 == 0:
+            #    alpha_w -=1
+            
         #    box_center = get_2d_box_center(ys, xs)
         #    pt1, pt2 = get_2d_box_from_instance(ys, xs)        
         #    img = cv2.rectangle(img, pt1, pt2, (255,255,255), 5)
@@ -92,6 +102,10 @@ def compute_centroid_vectors(instance_image):
     coordinates[:, :, 1] = g1
     coordinates[:, :, 0] = g2
     vecs = centroids - coordinates
+    heatmap_ = heatmap - np.abs(vecs)*alpha
+    heatmap_ = np.clip(heatmap_, 0, np.max(heatmap_))
+    heatmap_ = heatmap_/heatmap
+    heatmap = heatmap_[:,:,0]*heatmap_[:,:,1]
     mask = np.ma.masked_where(instance_image >= 1000, instance_image)
     
     if len(mask.mask.shape) > 1:
@@ -100,6 +114,9 @@ def compute_centroid_vectors(instance_image):
         mask = np.zeros(instance_image.shape, dtype=np.uint8)
     else:
         mask = np.ones(instance_image.shape, dtype=np.uint8)
+    
+    heatmap = heatmap*mask
+    
     mask = np.stack((mask, mask))
 
     # We load the images as H x W x channel, but we need channel x H x W.
@@ -107,19 +124,7 @@ def compute_centroid_vectors(instance_image):
     vecs = np.transpose(vecs, (2, 0, 1))
     vecs = vecs*mask
     vecs = np.transpose(vecs, (1, 2, 0))
-    #mask = np.transpose(mask, (1, 2, 0))
-    #mag_2d = np.linalg.norm(vecs,axis=-1)
-    #norm_vecs = np.zeros(mag_2d.shape + (2,))
-    #norm_vecs[:,:,0] = vecs[:,:,0]/mag_2d
-    #norm_vecs[:,:,1] = vecs[:,:,1]/mag_2d
-    #norm_vecs = norm_vecs*mask
-    #x_axis = unit_vector([0, 1])
-    #sign = np.sign(norm_vecs[:,:,0])
-    #angle = (np.arccos(np.clip((norm_vecs)*x_axis, -1.0, 1.0))/np.pi)[:,:,1]
-    #angle = (angle*sign + 1)*mask[:,:,0]
-    #angle /=2
-    #mag_2d = mag_2d*mask[:,:,0]
-    #print(np.unique(angle), np.unique(mag_2d))
+    
     plt.figure()
     plt.subplot(311)
     plt.imshow(vecs[:,:,0])
@@ -128,8 +133,8 @@ def compute_centroid_vectors(instance_image):
     plt.imshow(vecs[:,:,1])
     plt.title('y')
     plt.subplot(313)
-    plt.imshow(img)
-    plt.title('bounding_boxes')
+    plt.imshow(heatmap)
+    plt.title('heatmap')
     plt.show()
     
     vecs = vecs - np.min(vecs)
@@ -137,97 +142,6 @@ def compute_centroid_vectors(instance_image):
 
     return vecs, mask
 
-def regress_centers(Image):
-    instances = np.unique(Image)
-    instances = instances[instances > 1000]
-
-    mask = np.zeros_like(Image)
-    mask[np.where(Image > 1000)] = 1
-    w, h = Image.shape[0], Image.shape[1]
-    centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 2])
-    instance_prob = np.zeros([Image.shape[0], Image.shape[1], 1])
-    instance_heatmap = np.zeros([Image.shape[0], Image.shape[1], 1])
-    instance_prob = mask
-
-    for instance in instances:
-        # step A - get a center (x,y) for each instance
-        instance_pixels = np.array(np.where(Image == instance))
-        x_c, y_c = int(np.mean(instance_pixels[0])), int(np.mean(instance_pixels[1]))
-        instance_heatmap[x_c, y_c] = 1
-        # step B - calculate dist_x, dist_y of each pixel of instance from its center
-        x_dist = (-x_c + instance_pixels[0])
-        y_dist = (-y_c + instance_pixels[1])
-        instance = np.array((instance_pixels[0,:]-x_c,instance_pixels[1,:]-y_c))
-        x_axis = unit_vector([0, 1])
-        mag_2d = np.linalg.norm(instance,axis=0)
-        instance_norm = instance/mag_2d
-        angle_2d = (np.arccos(np.clip(np.transpose(instance/mag_2d)*x_axis, -1.0, 1.0))/np.pi)[:,1]
-        centroid_regression[instance_pixels] = mag_2d
-        #for x, y, d_x, d_y in zip(instance_pixels[0], instance_pixels[1], x_dist, y_dist):
-        #    x_axis = unit_vector([0, 1])
-        #    instance = unit_vector([x-x_c, y-y_c])
-        #    angle = (np.arccos(np.clip(np.dot(instance, x_axis), -1.0, 1.0)))/np.pi
-        #    mag = np.sqrt((x-x_c)**2 + (y-y_c)**2)
-        #    centroid_regression[x, y] = [d_y, d_x]
-        #    centroid_regression[x, y] = [mag, angle]
-      
-    instance_heatmap = cv2.GaussianBlur(instance_heatmap,(9,9),0)
-    instance_heatmap = instance_heatmap / instance_heatmap.max()
-    #centroids = convert_centroids(centroid_regression,op='down_scale')             
-    #normalized_centroid_regression = convert_centroids(centroids,op='normalize') 
-    return centroid_regression, instance_prob, instance_heatmap
-
-def unit_vector(vector):
-    """ Returns the unit vector of the vector.  """
-    return vector / np.linalg.norm(vector)
-
-def get_centers(centroids):
-    dx_img, dy_img = centroids[:,:,1], centroids[:,:,0]
-    centers = []
-    instance_img = np.zeros_like(dx_img)
-    im_h, im_w, _ = centroids.shape
-    for h, rows in tqdm(enumerate(zip(dx_img, dy_img))):
-        dx_row, dy_row = rows[0], rows[1]
-        for w, deltas in enumerate(zip(dx_row, dy_row)):
-            dx, dy = deltas[0], deltas[1]
-            if abs(dx)>0.1 and abs(dy)>0.1:
-                center = (int(w-dx),int(h-dy))
-                if len(centers) !=0 :
-                    closest_distance,closest_center = closest_node(center, centers)
-                    if closest_distance > im_w/20 :
-                        centers.append(center)
-                    else: 
-                        center = centers[closest_center]
-                else:
-                    centers.append(center)
-                instance_img[h,w] = centers.index(center)
-    return instance_img
-
-def get_centers_vectorized(centroids):
-    dx_img, dy_img = centroids[:,:,1], centroids[:,:,0]
-    center_x, center_y = np.zeros_like(dx_img,dtype=int),np.zeros_like(dy_img,dtype=int)
-    mask = (dx_img!=0).astype(int)*(dy_img!=0).astype(int)
-    h,w = center_x.shape
-    
-    for i in range(w):
-        center_x[:,i] = i
-    for j in range(h):
-        center_y[j,:] = j
-        
-    center_x = mask*(center_x - dx_img.astype(int))
-    center_y = mask*(center_y - dy_img.astype(int))
-    centers_new = np.where(((center_x * center_y) !=0),(center_x,center_y),0)
-    instances = np.zeros_like(center_x)
-    instance_id = 0
-    for h in tqdm(np.unique(center_y)):
-        for w in np.unique(center_x):
-            instance_x = (centers_new[0,:,:]==w).astype(int)
-            instance_y = (centers_new[1,:,:]==h).astype(int)
-            if np.sum(instance_x*instance_y)!=0 and h*w !=0:
-                instance_id +=1
-                instances[np.where(instance_x*instance_y==1)] = instance_id
-                
-    return instances
     
 def convert_instance_to_clusters(path_to_annotations):
     for root, dirs, names in os.walk(path_to_annotations, topdown=False):
@@ -314,5 +228,5 @@ plt.title('x')
 #plt.title('y')
 plt.show()
 '''
-#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
+convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')
