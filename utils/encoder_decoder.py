@@ -17,6 +17,8 @@ from models.fcn import FCN
 from models.fpn import FPN
 from models.vgg import VGGNet
 from models.efficientnet import efficientnet_b0, efficientnet_b1
+from utils.model_uitls import get_activation
+
 import pdb
 __all__ = ['FCN']
 
@@ -127,9 +129,10 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     #pdb.set_trace()
     return model
 
-def get_task_cls(in_channels, out_channels, kenrel_size = (1,1)):
+def get_task_cls(in_channels, out_channels, activation, kenrel_size = (1,1)):
     #pdb.set_trace()
-    return nn.Conv2d(in_channels,out_channels,kenrel_size) 
+    return nn.Sequential(nn.Conv2d(in_channels,out_channels,kenrel_size),
+                         get_activation(activation,inplace=True))
             
 def get_intermediate_result(model, output):
     encoder= model['encoder']
@@ -153,42 +156,46 @@ class _Encoder_Decoder(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.semantic_decoder = base_decoder_fn(in_planes, out_planes)
-        self.instance_decoder = base_decoder_fn(in_planes, out_planes, activation = 'Tanh')
+        #self.instance_decoder = base_decoder_fn(in_planes, out_planes, activation = 'Tanh')
         self.tasks = cfg['tasks']
         self.task_cls = {}
         self.model = cfg['model']
         self.semantic = get_task_cls(out_planes[-1], 
-                                          self.tasks['semantic']['out_channels'])
+                                          self.tasks['semantic']['out_channels'],
+                                          self.tasks['semantic']['activation'])
         self.instance_regression = get_task_cls(out_planes[-1], 
-                                          self.tasks['instance_regression']['out_channels'])
-        self.instance_probs = get_task_cls(out_planes[-1], 
-                                          self.tasks['instance_probs']['out_channels'])
+                                          self.tasks['instance']['out_channels'],
+                                          self.tasks['instance']['activation'])
+        #self.instance_probs = get_task_cls(out_planes[-1], 
+        #                                  self.tasks['instance_probs']['out_channels'])
         
     def forward(self, x):
         outputs = []
         x = self.encoder(x)
         intermediate_result, layers = get_intermediate_result(self.model, x)
         seg = self.semantic_decoder(intermediate_result,layers)
-        inst = self.instance_decoder(intermediate_result,layers)
+        #inst = self.instance_decoder(intermediate_result,layers)
         if self.tasks['semantic']['active']:
             out = self.semantic(seg)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs.append(out)
         else:
             pass
-        if self.tasks['instance_regression']['active']:
-            out = self.instance_regression(inst)
+        if self.tasks['instance']['active']:
+            out = self.instance_regression(seg)
+            #out = self.instance_regression(inst)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs.append(out)
         else:
             pass
+        '''
         if self.tasks['instance_probs']['active']:
             out = self.instance_probs(seg)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs.append(out)
         else:
             pass
-        
+        '''
         return outputs   # size=(N, n_class, x.H/1, x.W/1)
 
 

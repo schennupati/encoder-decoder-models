@@ -10,7 +10,7 @@ import glob
 import datetime
 import numpy as np
 from tqdm import tqdm
-
+import pdb
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
@@ -286,7 +286,8 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
         
         
-    elif task == 'instance_regression':
+    elif task == 'instance':
+        
         if train:
             x_img = outputs[task][0,0,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
             y_img = outputs[task][0,1,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
@@ -296,7 +297,6 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
             
         gt_x_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
         gt_y_img = targets[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        
         writer.add_image('Images/gt_{}_{}_dx'.format(state,task),gt_x_img,epoch)
         writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_y_img,epoch)
         writer.add_image('Images/det_{}_{}_dx'.format(state,task),x_img,epoch)

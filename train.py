@@ -30,6 +30,7 @@ def train(cfg):
     # Define dataloaders, model, optimizers and metrics
     dataloaders = get_dataloaders(cfg)
     model = get_model(cfg, device)
+    #print(model)
     criterion, loss_params = get_criterion(cfg, weights)
     optimizer = init_optimizer(model, params, criterion, loss_params)
     train_loss_meters, val_loss_meters, val_metrics = get_losses_and_metrics(cfg)

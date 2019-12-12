@@ -68,6 +68,15 @@ def convert_targets_instance_probs(targets,permute=(0,2,3,1)):
     new_targets[torch.where(targets<0.5)] = 0
     return new_targets
 
+def convert_targets_instance(targets,permute=(0,2,3,1)):    
+    targets = torch.squeeze((targets).permute(permute))
+    n,h,w = targets.size()
+    vecs = torch.zeros((n,h,w,2))
+    #mask = torch.zeros_like(targets)
+    for i in range(n):    
+        vecs[i,:,:,:] = compute_centroid_vector_torch(targets[i,:,:].float())
+    return vecs.permute(0,3,1,2)
+
 def convert_targets_instance_heatmaps(targets,permute=(0,2,3,1)):
     targets = torch.squeeze((targets).permute(permute))
     return targets/targets.max()
@@ -83,6 +92,8 @@ def get_convert_fn(task):
         return (convert_targets_instance_probs)
     elif task == 'instance_heatmaps':
         return (convert_targets_instance_heatmaps)
+    elif task == 'instance':
+        return (convert_targets_instance)
     else:
         return None
 
@@ -236,6 +247,32 @@ def regress_centers(Image):
         for y, x, d_y, d_x in zip(instance_pixels[0], instance_pixels[1], y_dist, x_dist):
             centroid_regression[y, x, :2] = [d_y, d_x]  # remember - y is distance in rows, x in columns
     return centroid_regression
+
+def compute_centroid_vector_torch(instance_image):
+    #start = timer()
+    instance_image_tensor = torch.Tensor(instance_image)
+    centroids_t = torch.zeros(instance_image.shape + (2,))
+    for value in torch.unique(instance_image_tensor):
+        xsys = torch.nonzero(instance_image_tensor == value)
+        xs, ys = xsys[:, 0], xsys[:, 1]
+        centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()), torch.mean(ys.float())))
+
+    coordinates = torch.zeros(instance_image.shape + (2,))
+    g1, g2 = torch.meshgrid(torch.arange(instance_image_tensor.size()[0]), torch.arange(instance_image_tensor.size()[1]))
+    coordinates[:, :, 0] = g1
+    coordinates[:, :, 1] = g2
+    vecs = centroids_t - coordinates
+    mask = instance_image_tensor >= 1000
+    if len(mask.size()) > 1:
+        mask = mask.int()
+    elif mask is False:
+        mask = np.zeros(instance_image.shape, dtype=np.uint8)
+    else:
+        mask = np.ones(instance_image.shape, dtype=np.uint8)
+    vecs[:,:,0] = vecs[:,:,0]*mask
+    vecs[:,:,1] = vecs[:,:,1]*mask
+    #print('centroids torch', timer() - start)
+    return vecs#, mask[:,:,0]
 
 def get_cfg(config):
     with open(config) as fp:

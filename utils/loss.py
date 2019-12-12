@@ -103,7 +103,7 @@ def instance_loss(input, target, weight=None, size_average=None):
         input = input.permute(0,2,3,1).squeeze()
         target = target.squeeze()
     non_zeros = torch.nonzero(target.data).size(0)
-    return F.mse_loss(input, target,reduction='mean')#/non_zeros
+    return F.l1_loss(input, target,reduction='mean')#/non_zeros
 
     
     

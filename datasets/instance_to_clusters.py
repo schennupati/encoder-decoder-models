@@ -63,18 +63,34 @@ def closest_node(node, nodes):
     nodes = np.asarray(nodes)
     dist_2 = np.sqrt(np.sum((nodes - node)**2, axis=1))
     return np.min(dist_2), np.argmin(dist_2)
-    
+
+def get_2d_box_from_instance(xs, ys):
+    vetex_1 = (np.min(xs), np.min(ys))
+    vetex_2 = (np.max(xs), np.max(ys))
+    return vetex_1, vetex_2
+
+def get_2d_box_center(xs, ys):
+    vetex_1, vetex_2 = get_2d_box_from_instance(xs, ys)
+    return (int((vetex_1[0]+vetex_2[0])/2),int((vetex_1[1]+vetex_2[1])/2))
 
 def compute_centroid_vectors(instance_image):
     centroids = np.zeros(instance_image.shape + (2,))
+    img = np.zeros(instance_image.shape + (3,))
     for value in np.unique(instance_image):
         xs, ys = np.where(instance_image == value)
-        centroids[xs, ys] = np.array((np.mean(xs), np.mean(ys)))
-        
+        #if value>1000:
+        #    center_coordinates = (int(np.mean(ys)), int(np.mean(xs)))
+        #    box_center = get_2d_box_center(ys, xs)
+        #    pt1, pt2 = get_2d_box_from_instance(ys, xs)        
+        #    img = cv2.rectangle(img, pt1, pt2, (255,255,255), 5)
+        #    img = cv2.circle(img, center_coordinates, 3, (0,255,0), 5) 
+        #    img = cv2.circle(img, box_center, 3, (255,0,0), 5) 
+        centroids[xs, ys] = np.array((np.mean(ys), np.mean(xs)))
+    h, w = instance_image.shape[0], instance_image.shape[1]
     coordinates = np.zeros(instance_image.shape + (2,))
-    g1, g2 = np.mgrid[range(instance_image.shape[0]), range(instance_image.shape[1])]
-    coordinates[:, :, 0] = g1
-    coordinates[:, :, 1] = g2
+    g1, g2 = np.mgrid[range(h), range(w)]
+    coordinates[:, :, 1] = g1
+    coordinates[:, :, 0] = g2
     vecs = centroids - coordinates
     mask = np.ma.masked_where(instance_image >= 1000, instance_image)
     
@@ -88,29 +104,32 @@ def compute_centroid_vectors(instance_image):
 
     # We load the images as H x W x channel, but we need channel x H x W.
     # We don't need to transpose the mask as it has no channels.
-    #vecs = np.transpose(vecs, (2, 0, 1))
-    #vecs = vecs*mask
-    #vecs = np.transpose(vecs, (1, 2, 0))
-    mask = np.transpose(mask, (1, 2, 0))
-    mag_2d = np.linalg.norm(vecs,axis=-1)
-    norm_vecs = np.zeros(mag_2d.shape + (2,))
-    norm_vecs[:,:,0] = vecs[:,:,0]/mag_2d
-    norm_vecs[:,:,1] = vecs[:,:,1]/mag_2d
-    norm_vecs = norm_vecs*mask
-    x_axis = unit_vector([0, 1])
-    sign = np.sign(norm_vecs[:,:,0])
-    angle = (np.arccos(np.clip((norm_vecs)*x_axis, -1.0, 1.0))/np.pi)[:,:,1]
-    angle = (angle*sign + 1)*mask[:,:,0]
-    angle /=2
-    mag_2d = mag_2d*mask[:,:,0]
-    print(np.unique(angle), np.unique(mag_2d))
+    vecs = np.transpose(vecs, (2, 0, 1))
+    vecs = vecs*mask
+    vecs = np.transpose(vecs, (1, 2, 0))
+    #mask = np.transpose(mask, (1, 2, 0))
+    #mag_2d = np.linalg.norm(vecs,axis=-1)
+    #norm_vecs = np.zeros(mag_2d.shape + (2,))
+    #norm_vecs[:,:,0] = vecs[:,:,0]/mag_2d
+    #norm_vecs[:,:,1] = vecs[:,:,1]/mag_2d
+    #norm_vecs = norm_vecs*mask
+    #x_axis = unit_vector([0, 1])
+    #sign = np.sign(norm_vecs[:,:,0])
+    #angle = (np.arccos(np.clip((norm_vecs)*x_axis, -1.0, 1.0))/np.pi)[:,:,1]
+    #angle = (angle*sign + 1)*mask[:,:,0]
+    #angle /=2
+    #mag_2d = mag_2d*mask[:,:,0]
+    #print(np.unique(angle), np.unique(mag_2d))
     plt.figure()
-    plt.subplot(211)
-    plt.imshow(mag_2d)
+    plt.subplot(311)
+    plt.imshow(vecs[:,:,0])
     plt.title('x')
-    plt.subplot(212)
-    plt.imshow(angle)
+    plt.subplot(312)
+    plt.imshow(vecs[:,:,1])
     plt.title('y')
+    plt.subplot(313)
+    plt.imshow(img)
+    plt.title('bounding_boxes')
     plt.show()
     
     vecs = vecs - np.min(vecs)
@@ -124,7 +143,7 @@ def regress_centers(Image):
 
     mask = np.zeros_like(Image)
     mask[np.where(Image > 1000)] = 1
-
+    w, h = Image.shape[0], Image.shape[1]
     centroid_regression = np.zeros([Image.shape[0], Image.shape[1], 2])
     instance_prob = np.zeros([Image.shape[0], Image.shape[1], 1])
     instance_heatmap = np.zeros([Image.shape[0], Image.shape[1], 1])
@@ -221,14 +240,15 @@ def convert_instance_to_clusters(path_to_annotations):
                 regression_tag = tag + '_instanceRegression'
                 probability_tag = tag + '_instanceProbs'
                 heatmap_tag = tag + '_instanceHeatmaps'
-                image = cv2.imread(os.path.join(root,name),-1)
+                image = cv2.imread(os.path.join(root, name),-1)
                 vecs, mask = compute_centroid_vectors(image)
                 #centroids, instance_prob, instance_heatmap = regress_centers(image)
                 #denormalized = convert_centroids(centroids,op='denormalize')
                 #centroids  = convert_centroids(denormalized,op='up_scale',stride=4)
-                vecs = vecs*mask
-                vecs = vecs - np.min(vecs)
-                vecs = vecs/np.max(vecs)
+                #vecs = vecs*mask
+                #vecs = vecs - np.min(vecs)
+                #vecs = vecs/np.max(vecs)
+                '''
                 plt.figure()
                 plt.subplot(221)
                 plt.imshow(vecs[0])
@@ -244,6 +264,7 @@ def convert_instance_to_clusters(path_to_annotations):
                 plt.title('heatmaps')
                 plt.show()
                 break
+                '''
                 #np.savez_compressed(os.path.join(root,regression_tag),centroids)
                 #np.savez_compressed(os.path.join(root,probability_tag),instance_prob)
                 #np.savez_compressed(os.path.join(root,heatmap_tag),instance_heatmap)
@@ -293,5 +314,5 @@ plt.title('x')
 #plt.title('y')
 plt.show()
 '''
-convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
+#convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/train')
 #convert_instance_to_clusters('/home/sumche/datasets/Cityscapes/gtFine/val')
