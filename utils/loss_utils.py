@@ -113,14 +113,17 @@ class loss_meters:
     def get_loss_meters(self):
         meters = {}
         for task in self.cfg.keys():
-            meters[task] = averageMeter()
+            if self.cfg[task]['active']:
+                meters[task] = averageMeter()
         return meters
     
     def update(self,losses):
         for task in self.cfg.keys():
-            self.meters[task].update(losses[task])
+             if self.cfg[task]['active']:
+                self.meters[task].update(losses[task])
     
     def reset(self):
         for task in self.cfg.keys():
-            self.meters[task].reset()
+             if self.cfg[task]['active']:
+                self.meters[task].reset()
     

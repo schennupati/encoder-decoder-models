@@ -99,9 +99,9 @@ class metrics:
     def get_metrics(self):
         metrics = {}
         for task in self.cfg.keys():
-            if self.cfg[task]['metric'] == 'classification_metrics':
+            if self.cfg[task]['metric'] == 'classification_metrics' and self.cfg[task]['active']:
                 metrics[task] = runningScore(self.cfg[task]['out_channels'])
-            elif self.cfg[task]['metric'] == 'regression_metrics':
+            elif self.cfg[task]['metric'] == 'regression_metrics' and self.cfg[task]['active']:
                 metrics[task] = regressionAccruacy()
             else:
                 metrics[task] = None
@@ -109,12 +109,12 @@ class metrics:
     
     def update(self,label_trues, label_preds):
         for task in self.cfg.keys():
-            if self.cfg[task]['metric'] != 'None':
+            if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
                 gt = label_trues[task].data.cpu().numpy()
                 pred = label_preds[task].data.cpu().numpy()
                 self.metrics[task].update(gt, pred) 
     
     def reset(self):
         for task in self.cfg.keys():
-            if self.cfg[task]['metric'] != 'None':
+            if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
                 self.metrics[task].reset()
