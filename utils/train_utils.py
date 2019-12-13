@@ -14,7 +14,8 @@ import pdb
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
-
+import io
+import tensorflow as tf
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
 from utils.data_utils import (convert_targets, convert_outputs, 
@@ -267,7 +268,15 @@ def stop_training(patience,plateau_count,early_stop,epoch,state):
         print('Early Stopping after {} epochs: Patience of {} epochs reached.'.format(epoch+1,plateau_count))
         print('Best Checkpoint:')
         return True
-            
+
+def get_color_inst(inst_seg):
+    colour_inst = np.zeros((inst_seg.shape[0], inst_seg.shape[1], 3))
+    colour_inst[:,:,:2] = inst_seg
+    colour_inst = colour_inst - np.min(colour_inst)
+    colour_inst = colour_inst / np.max(colour_inst)
+    
+    return colour_inst
+       
 def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,train=False):
     
     state = 'train' if train else 'validation'
@@ -281,20 +290,31 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
         
     elif task == 'instance_regression':
-        
         if train:
-            x_img = outputs[task][0,0,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
-            y_img = outputs[task][0,1,:,:].detach().cpu().unsqueeze(0).numpy().astype(np.uint8)
+            img = get_color_inst(outputs[task][0,:,:,:].detach().cpu().permute(1,2,0).numpy())
         else:
-            x_img = outputs[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-            y_img = outputs[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-            
-        gt_x_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        gt_y_img = targets[task][0,1,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        writer.add_image('Images/gt_{}_{}_dx'.format(state,task),gt_x_img,epoch)
-        writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_y_img,epoch)
-        writer.add_image('Images/det_{}_{}_dx'.format(state,task),x_img,epoch)
-        writer.add_image('Images/det_{}_{}_dy'.format(state,task),y_img,epoch)
+            img = get_color_inst(outputs[task][0,:,:,:].cpu().permute(1,2,0).numpy())
+        gt_img = get_color_inst(targets[task][0,:,:,:].cpu().permute(1,2,0).numpy())
+        
+        gt_dx = np.expand_dims(gt_img[:,:,0], axis=0)
+        gt_dy = np.expand_dims(gt_img[:,:,1], axis=0)
+        det_dx = np.expand_dims(img[:,:,0], axis=0)
+        det_dy = np.expand_dims(img[:,:,1], axis=0)
+
+        writer.add_image('Images/gt_{}_{}_dx'.format(state,task),gt_dx,epoch)
+        writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_dy,epoch)
+        writer.add_image('Images/det_{}_{}_dx'.format(state,task),det_dx,epoch)
+        writer.add_image('Images/det_{}_{}_dy'.format(state,task),det_dy,epoch)
+        
+        
+    elif task == 'instance_heatmap':
+        if train:
+            img = outputs[task][0,:,:].detach().cpu().numpy()
+        else:
+            img = outputs[task][0,:,:].cpu().numpy()
+        gt_img = targets[task][0,:,:].cpu().unsqueeze(0).numpy()
+        writer.add_image('Images/gt_{}_{}'.format(state,task),gt_img,epoch)
+        writer.add_image('Images/det_{}_{}'.format(state,task),img,epoch)
             
     elif task == 'instance_probs':
         if train:
@@ -302,8 +322,8 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         else:
             img = decode_segmap(predictions[task][0,:,:].cpu(),nc=2,labels = prob_labels)
         target = decode_segmap(targets[task][0,:,:].cpu(),nc=2,labels = prob_labels)
-        writer.add_image('Images/gt_{}_{}_probs'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/det_{}_{}_probs'.format(state,task), img,epoch,dataformats='HWC')
+        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
         
     
     elif task == 'disparity':
@@ -314,9 +334,3 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         gt_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
         writer.add_image('Images/gt_{}_{}'.format(state,task),gt_img,epoch)
         writer.add_image('Images/det_{}_{}'.format(state,task),img,epoch)
-        
-    
-    
-
-    
-    

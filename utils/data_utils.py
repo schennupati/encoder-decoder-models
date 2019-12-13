@@ -10,7 +10,6 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 from utils.im_utils import labels, prob_labels
-import pdb
 import matplotlib.pyplot as plt
 
 def transform_targets(targets,permute):
@@ -60,6 +59,7 @@ def convert_targets_instance(targets,permute=(0,2,3,1)):
     
     for i in range(n):    
         reg, mask, heatmap = compute_centroid_vector_torch(targets[i,:,:].float())
+        #print((torch.min(reg), torch.max(reg)), (torch.min(heatmap), torch.max(heatmap)))
         vecs[i,:,:,:] = reg.float()
         masks[i,:,:] = mask.long()
         heatmaps[i,:,:] = heatmap.float()
@@ -204,7 +204,7 @@ def compute_centroid_vector_torch(instance_image):
     alpha = 2.0
     instance_image_tensor = torch.Tensor(instance_image)
     centroids_t = torch.zeros(instance_image.shape + (2,))
-    heatmap_t = torch.ones(instance_image.shape + (2,))
+    w_h = torch.ones(instance_image.shape + (2,))
     for value in torch.unique(instance_image_tensor):
         xsys = torch.nonzero(instance_image_tensor == value)
         xs, ys = xsys[:, 0], xsys[:, 1]
@@ -212,18 +212,16 @@ def compute_centroid_vector_torch(instance_image):
         if value > 1000:
             #pdb.set_trace()
             w, h = get_instance_hw(xs, ys)
-            heatmap_t[xs, ys,0], heatmap_t[xs, ys,1]  = w.float(), h.float()
+            if w!=0 and h!=0:
+                w_h[xs, ys,0], w_h[xs, ys,1]  = w.float(), h.float()
 
     coordinates = torch.zeros(instance_image.shape + (2,))
     g1, g2 = torch.meshgrid(torch.arange(instance_image_tensor.size()[0]), torch.arange(instance_image_tensor.size()[1]))
     coordinates[:, :, 0] = g1
     coordinates[:, :, 1] = g2
-    vecs = centroids_t - coordinates
+    vecs = coordinates - centroids_t
     
-    heatmap_ = heatmap_t - torch.abs(vecs)*alpha
-    heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
-    heatmap_ = heatmap_/heatmap_t
-    heatmap_t = heatmap_[:,:,0]*heatmap_[:,:,1]
+    
     mask = instance_image_tensor >= 1000
     if len(mask.size()) > 1:
         mask = mask.int()
@@ -231,10 +229,16 @@ def compute_centroid_vector_torch(instance_image):
         mask = np.zeros(instance_image.shape)
     else:
         mask = np.ones(instance_image.shape)
-    vecs[:,:,0] = vecs[:,:,0]*mask.float()
-    vecs[:,:,1] = vecs[:,:,1]*mask.float()
-    heatmap_t = heatmap_t*mask.float()
+    vecs[:,:,0] = vecs[:,:,0]*mask
+    vecs[:,:,1] = vecs[:,:,1]*mask
+    heatmap_ = w_h - (torch.abs(vecs)*alpha)
+    #heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
     
+    heatmap_[:,:,0] /= w_h[:,:,0]
+    heatmap_[:,:,1] /= w_h[:,:,1]
+    heatmap_t = heatmap_[:,:,0]*heatmap_[:,:,1]
+    heatmap_t = heatmap_t*mask
+    #print((torch.min(vecs), torch.max(vecs)), (torch.min(heatmap_), torch.max(heatmap_)))
     return vecs.permute(2,0,1), mask, heatmap_t
 
 def get_cfg(config):

@@ -6,7 +6,7 @@ Created on Thu Jul 25 20:00:48 2019
 @author: sumche
 """
 from collections import OrderedDict
-
+import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision.models._utils import IntermediateLayerGetter
@@ -153,7 +153,8 @@ class _Encoder_Decoder(nn.Module):
                  in_planes, out_planes):
         super().__init__()
         self.encoder = encoder
-        self.base_decoder = base_decoder_fn(in_planes, out_planes)
+        self.class_decoder = base_decoder_fn(in_planes, out_planes)
+        self.reg_decoder = base_decoder_fn(in_planes, out_planes)
         self.task_cls = {}
         self.model = cfg['model']
         self.heads = cfg['model']['outputs']
@@ -174,23 +175,23 @@ class _Encoder_Decoder(nn.Module):
         outputs = {}
         x = self.encoder(x)
         intermediate_result, layers = get_intermediate_result(self.model, x)
-        feat = self.base_decoder(intermediate_result,layers)
+        class_feat = self.class_decoder(intermediate_result,layers)
+        reg_feat = self.reg_decoder(intermediate_result,layers)
         if self.heads['semantic']['active']:
-            out = self.semantic(feat)
+            out = self.semantic(class_feat)
             out = F.relu(out, inplace=True)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['semantic'] = out
         if self.heads['instance_regression']['active']:
-            out = self.instance_regression(feat)
+            out = self.instance_regression(reg_feat)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_regression'] = out
         if self.heads['instance_heatmap']['active']:
-            out = self.instance_heatmap(feat)
-            out = F.relu(out, inplace=True)
+            out = self.instance_heatmap(reg_feat)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_heatmap'] = out
         if self.heads['instance_probs']['active']:
-            out = self.instance_probs(feat)
+            out = self.instance_probs(class_feat)
             out = F.relu(out, inplace=True)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_probs'] = out 

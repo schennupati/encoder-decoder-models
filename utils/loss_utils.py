@@ -56,22 +56,37 @@ class MultiTaskLoss(nn.Module):
         self.n = len(self.tasks)
         self.sigma = nn.Parameter(torch.ones(self.n))
         self.loss_type = loss_type
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=255)
+        self.l1 = nn.L1Loss(reduction='sum')
 
     def forward(self, predictions, targets):
-        
         for task in self.tasks:
             if self.cfg[task]['active']:
                 prediction = predictions[task]
                 target = targets[task]
                 weight = self.weights[task]
                 loss_fn  = self.cfg[task]['loss']
-                self.losses[task] = compute_task_loss(prediction, 
+                self.losses[task] = self.compute_task_loss(prediction, 
                                                       target, weight, loss_fn)
 
         device = self.losses[task].get_device()
         self.sigma.to(device)
         total_loss =  self.compute_total_loss()
         return self.losses, total_loss
+    
+    def compute_task_loss(self, prediction, target, weight, loss_fn):
+        if loss_fn == 'cross_entropy2d':
+            loss = self.cross_entropy(prediction, target.long())
+        elif loss_fn ==  'l1':
+            #print( torch.unique(target[0]))
+            non_zeros = torch.nonzero(target).size(0)
+            if prediction.size() !=target.size():
+                prediction = prediction.permute(0,2,3,1).squeeze()
+            loss = self.l1(prediction, target)
+            loss = loss/non_zeros if non_zeros >0 else torch.zeros_like(loss)
+            
+            
+        return loss        
     
     def compute_total_loss(self):
         loss = 0.0
@@ -83,7 +98,7 @@ class MultiTaskLoss(nn.Module):
             for i, task in enumerate(self.losses.keys()):
                 if self.cfg[task]['loss'] == 'cross_entropy2d':
                     loss += torch.exp(-self.sigma[i])*self.losses[task] + 0.5*self.sigma[i]
-                elif self.cfg[task]['loss'] == 'instance_loss':
+                elif self.cfg[task]['loss'] == 'l1':
                     loss += 0.5*(torch.exp(-self.sigma[i])*self.losses[task] + self.sigma[i])
         return loss
 
