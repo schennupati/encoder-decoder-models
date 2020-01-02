@@ -232,7 +232,7 @@ def compute_centroid_vector_torch(instance_image):
     vecs[:,:,0] = vecs[:,:,0]*mask
     vecs[:,:,1] = vecs[:,:,1]*mask
     heatmap_ = w_h - (torch.abs(vecs)*alpha)
-    #heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
+    heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
     
     heatmap_[:,:,0] /= w_h[:,:,0]
     heatmap_[:,:,1] /= w_h[:,:,1]
