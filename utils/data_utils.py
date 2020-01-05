@@ -11,6 +11,7 @@ import yaml
 from tqdm import tqdm
 from utils.im_utils import labels, prob_labels
 import matplotlib.pyplot as plt
+import cv2
 
 def transform_targets(targets,permute):
     return torch.squeeze((targets*255).permute(permute))
@@ -56,17 +57,38 @@ def convert_targets_instance(targets,permute=(0,2,3,1)):
     vecs = torch.zeros((n,2,h,w))
     masks = torch.zeros((n,h,w))
     heatmaps = torch.zeros((n,h,w))
-    
+    contours = torch.zeros((n,h,w))
     for i in range(n):    
-        reg, mask, heatmap = compute_centroid_vector_torch(targets[i,:,:].float())
+        reg, mask, heatmap, contour = compute_centroid_vector_torch(targets[i,:,:].float())
         #print((torch.min(reg), torch.max(reg)), (torch.min(heatmap), torch.max(heatmap)))
         vecs[i,:,:,:] = reg.float()
         masks[i,:,:] = mask.long()
         heatmaps[i,:,:] = heatmap.float()
+        contours[i,:,:] = contour.long()
     
     converted_targets = {'instance_regression': vecs,
                          'instance_probs': masks,
-                         'instance_heatmap':heatmaps}    
+                         'instance_heatmap':heatmaps,
+                         'instance_contour': contours}    
+    return converted_targets
+
+def convert_targets_instance_contours(targets,permute=(0,2,3,1)):
+        
+    targets = torch.squeeze((targets).permute(permute)) 
+    if len(targets.size()) > 2: 
+        n,h,w = targets.size()
+    elif len(targets.size()) == 2:
+        h, w = targets.size()
+        n = 1
+        targets = targets.unsqueeze(0)
+    contours = torch.zeros((n,h,w))
+    
+    for i in range(n):    
+        cont = compute_instance_contours(targets[i,:,:].float())
+        #print((torch.min(reg), torch.max(reg)), (torch.min(heatmap), torch.max(heatmap)))
+        contours[i,:,:] = cont.long()
+    
+    converted_targets =  {'instance_contour': contours}
     return converted_targets
 
 def get_convert_fn(task):
@@ -75,7 +97,7 @@ def get_convert_fn(task):
     elif task == 'disparity':
         return (convert_targets_disparity)
     elif task == 'instance':
-        return (convert_targets_instance)
+        return (convert_targets_instance) # Replace accordingly
     else:
         return None
 
@@ -201,7 +223,8 @@ def get_instance_hw(xs, ys):
     return (abs(vertex_1[0]-vertex_2[0]), abs(vertex_1[1]-vertex_2[1]))
 
 def compute_centroid_vector_torch(instance_image):
-    alpha = 2.0
+    alpha = 5.0
+    contours = np.zeros(instance_image.shape)
     instance_image_tensor = torch.Tensor(instance_image)
     centroids_t = torch.zeros(instance_image.shape + (2,))
     w_h = torch.ones(instance_image.shape + (2,))
@@ -211,6 +234,15 @@ def compute_centroid_vector_torch(instance_image):
         centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()), torch.mean(ys.float())))
         if value > 1000:
             #pdb.set_trace()
+            cont = np.array([xs.numpy(), ys.numpy()])
+            for x in np.unique(cont[0,:]):
+                idx = np.where(cont[0,:]==x)
+                contours[x, np.min(cont[1,idx])] = 1
+                contours[x, np.max(cont[1,idx])] = 1
+            for y in np.unique(cont[1,:]):
+                idx = np.where(cont[1,:]==y)
+                contours[np.min(cont[0,idx]), y] = 1
+                contours[np.max(cont[0,idx]), y] = 1
             w, h = get_instance_hw(xs, ys)
             if w!=0 and h!=0:
                 w_h[xs, ys,0], w_h[xs, ys,1]  = w.float(), h.float()
@@ -238,8 +270,28 @@ def compute_centroid_vector_torch(instance_image):
     heatmap_[:,:,1] /= w_h[:,:,1]
     heatmap_t = heatmap_[:,:,0]*heatmap_[:,:,1]
     heatmap_t = heatmap_t*mask
+    kernel = np.ones((3,3), np.uint8)
+    contours = cv2.dilate(contours, kernel, iterations=1)
     #print((torch.min(vecs), torch.max(vecs)), (torch.min(heatmap_), torch.max(heatmap_)))
-    return vecs.permute(2,0,1), mask, heatmap_t
+    return vecs.permute(2,0,1), mask, heatmap_t, torch.tensor(contours)
+
+def compute_instance_contours(instance_image):
+    contours = np.zeros(instance_image.shape)
+    for value in np.unique(instance_image):
+        xs, ys = np.where(instance_image == value)
+        if value>23:
+            cont = np.array([xs, ys])
+            for x in np.unique(cont[0,:]):
+                idx = np.where(cont[0,:]==x)
+                contours[x, np.min(cont[1,idx])] = 1
+                contours[x, np.max(cont[1,idx])] = 1
+            for y in np.unique(cont[1,:]):
+                idx = np.where(cont[1,:]==y)
+                contours[np.min(cont[0,idx]), y] = 1
+                contours[np.max(cont[0,idx]), y] = 1
+    kernel = np.ones((3,3), np.uint8)
+    contours = cv2.dilate(contours, kernel, iterations=1)
+    return torch.tensor(contours)
 
 def get_cfg(config):
     with open(config) as fp:

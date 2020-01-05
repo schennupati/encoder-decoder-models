@@ -127,8 +127,9 @@ class Cityscapes(VisionDataset):
         if not isinstance(target_type, list):
             self.target_type = [target_type]
 
-        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity','instance_regression', 'instance_probs', 'instance_heatmaps'] for t in self.target_type):
-            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "instance_regression", "instance_probs", "instance_heatmaps", "semantic", "polygon"'
+        if not all(t in ['instance', 'semantic', 'polygon', 'color','disparity', 
+                         ] for t in self.target_type):
+            raise ValueError('Invalid value for "target_type"! Valid values are: "instance", "semantic", "polygon"'
                              ' or "color"')
 
         if not os.path.isdir(self.images_dir) or not os.path.isdir(self.targets_dir):
@@ -163,11 +164,6 @@ class Cityscapes(VisionDataset):
         for i, t in enumerate(self.target_type):
             if t == 'polygon':
                 target = self._load_json(self.targets[index][i])
-            elif t in ['instance_regression', 'instance_probs', 'instance_heatmaps'] :
-                if t == 'instance_regression':
-                    target = self._load_npz(self.targets[index][i], upscale=True)
-                else:
-                    target = self._load_npz(self.targets[index][i])
             else:
                 target = Image.open(self.targets[index][i])
 
@@ -225,10 +221,4 @@ class Cityscapes(VisionDataset):
             return '{}_polygons.json'.format(mode)
         elif target_type == 'disparity':
             return 'disparity.png'
-        elif target_type == 'instance_regression':
-            return '{}_instanceRegression.npz'.format(mode)
-        elif target_type == 'instance_probs':
-            return '{}_instanceProbs.npz'.format(mode)
-        elif target_type == 'instance_heatmaps':
-            return '{}_instanceHeatmaps.npz'.format(mode)
 

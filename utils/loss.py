@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 #from utils.data_utils import up_scale_tensors
 
-def cross_entropy2d(input, target, weight=None, size_average=True):
+def flatten_data(input, target):
     target = target.long()
     n, c, h, w = input.size()
     if len(target.size())==2 and n==1:
@@ -26,9 +26,26 @@ def cross_entropy2d(input, target, weight=None, size_average=True):
         input = F.interpolate(input, size=(ht, wt), mode="bilinear", align_corners=True)
     input = input.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
     target = target.view(-1)
+
+    return input, target
+
+def cross_entropy2d(input, target, weight=None, size_average=True):
+    input, target = flatten_data(input, target)
     loss = F.cross_entropy(
         input, target, weight=weight, ignore_index=255)
     return loss
+
+def weighted_binary_cross_entropy(input, target, weights=None):
+    #input, target = flatten_data(input, target)
+    if weights is not None:
+        assert len(weights) == 2
+        
+        loss = weights[0] * (target * torch.log(input)) + \
+               weights[1] * ((1 - target) * torch.log(1 - input))
+    else:
+        loss = target * torch.log(input) + (1 - target) * torch.log(1 - input)
+
+    return torch.neg(torch.mean(loss))
 
 
 def multi_scale_cross_entropy2d(input, target, weight=None, size_average=True, scale_weight=None):

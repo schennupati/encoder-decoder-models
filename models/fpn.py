@@ -38,12 +38,13 @@ class _FPNModel(nn.Module):
         feat3 = self.upsample3(intermediate_result[layers[-3]])
         # size=(N, 128, x.H/4, x.W/4)
         feat4 = self.upsample4(intermediate_result[layers[-4]])
-        score = feat1 + feat2 + feat3 + feat4
+        score = feat1+ feat2 + feat3 + feat4
+        feats = [feat1, feat2, feat3, feat4]
         # size=(N, n_class, x.H/1, x.W/1)
         #score = self.upsample5(score)
         #print(score.size())
         
-        return score  # size=(N, n_class, x.H/1, x.W/1)
+        return score, feats  # size=(N, n_class, x.H/1, x.W/1)
     
     def upsample(self, in_channels, out_channels, activation='ReLU', activate_last =True,
                  upsample =True, kernel_size=3, factor=2, dilation=1):

@@ -25,6 +25,7 @@ from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss
 from utils.im_utils import cat_labels,prob_labels, decode_segmap
 from PIL import Image
 import matplotlib.pyplot as plt
+from instance_to_clusters import get_clusters
 
 def get_device(cfg):
     device_str = 'cuda:{}'.format(cfg['params']['gpu_id']) if not cfg['params']['multigpu'] else "cuda:0"
@@ -183,8 +184,8 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
             loss_str += " {}_loss: {}".format(k, v.avg)
             if writer:
                 writer.add_scalar('Loss/train_{}'.format(k), v.avg, epoch*n_steps + step)
-                if step == 0:
-                    add_images_to_writer(inputs,outputs,predictions,targets,writer,k,epoch,train=True)
+                #if step == 0:
+                add_images_to_writer(inputs,outputs,predictions,targets,writer,k,epoch,train=True)
         print(loss_str)
     running_loss.reset()
     train_loss_meters.reset()
@@ -281,30 +282,49 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
     
     state = 'train' if train else 'validation'
     img = inputs[0,:,:,:]
-    writer.add_image('Images/{}_Input_image'.format(state),img,epoch,dataformats='CHW')
+    writer.add_image('Images/{}/Input_image'.format(state),img,epoch,dataformats='CHW')
     
     if task == 'semantic':
         img = decode_segmap(predictions[task][0,:,:].cpu())
         target = decode_segmap(targets[task][0,:,:].cpu())
-        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
+    
+    elif task == 'instance_contour':
+        if train:
+            img = np.expand_dims(predictions[task][0,0,:,:].detach().cpu(), axis=-1)
+        else:
+            img = np.expand_dims(predictions[task][0,0,:,:].cpu(), axis=-1)
+        #print(np.unique(img))
+        img = (img - np.min(img))/(np.max(img) - np.min(img))
+        target = np.expand_dims(targets[task][0,:,:].cpu(), axis=-1)
+        writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
         
     elif task == 'instance_regression':
         if train:
-            img = get_color_inst(outputs[task][0,:,:,:].detach().cpu().permute(1,2,0).numpy())
+            vecs = outputs[task][0,:,:,:].detach().cpu().numpy()
+            mask = predictions['instance_probs'][0,:,:].detach().cpu().numpy()
+            heatmap = outputs['instance_heatmap'][0,:,:].detach().cpu().numpy()
+            img = get_color_inst(vecs.transpose(1,2,0))
         else:
-            img = get_color_inst(outputs[task][0,:,:,:].cpu().permute(1,2,0).numpy())
-        gt_img = get_color_inst(targets[task][0,:,:,:].cpu().permute(1,2,0).numpy())
-        
-        gt_dx = np.expand_dims(gt_img[:,:,0], axis=0)
-        gt_dy = np.expand_dims(gt_img[:,:,1], axis=0)
-        det_dx = np.expand_dims(img[:,:,0], axis=0)
-        det_dy = np.expand_dims(img[:,:,1], axis=0)
+            vecs = outputs[task][0,:,:,:].cpu().numpy()
+            mask = predictions['instance_probs'][0,:,:].cpu().numpy()
+            heatmap = outputs['instance_heatmap'][0,:,:].cpu().numpy()
+            img = get_color_inst(vecs.transpose(1,2,0))
+        gt_vecs = targets[task][0,:,:,:].cpu().numpy()
+        gt_mask = targets['instance_probs'][0,:,:].cpu().numpy()
+        gt_heatmap = targets['instance_heatmap'][0,:,:].cpu().unsqueeze(0).numpy()
+        gt_img = get_color_inst(gt_vecs.transpose(1,2,0))
+        gt_inst_img = get_clusters(gt_vecs, gt_mask, gt_heatmap[0])
+        #inst_img = get_clusters(vecs, mask, np.clip(heatmap,0,np.max(heatmap)))
 
-        writer.add_image('Images/gt_{}_{}_dx'.format(state,task),gt_dx,epoch)
-        writer.add_image('Images/gt_{}_{}_dy'.format(state,task),gt_dy,epoch)
-        writer.add_image('Images/det_{}_{}_dx'.format(state,task),det_dx,epoch)
-        writer.add_image('Images/det_{}_{}_dy'.format(state,task),det_dy,epoch)
+        writer.add_image('Images/{}/gt/{}_vecs'.format(state,task),gt_img,epoch,dataformats='HWC')
+        #writer.add_image('Images/{}/gt_{}_dy'.format(state,task),gt_dy,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/gt/{}_instance'.format(state,task),gt_inst_img,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/{}_vecs'.format(state,task),img,epoch,dataformats='HWC')
+        #writer.add_image('Images/{}/det_t_{}_dy'.format(state,task),det_dy,epoch,dataformats='HWC')
+        #writer.add_image('Images/{}/det_{}_instance'.format(state,task),inst_img,epoch)
         
         
     elif task == 'instance_heatmap':
@@ -313,8 +333,8 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         else:
             img = outputs[task][0,:,:].cpu().numpy()
         gt_img = targets[task][0,:,:].cpu().unsqueeze(0).numpy()
-        writer.add_image('Images/gt_{}_{}'.format(state,task),gt_img,epoch)
-        writer.add_image('Images/det_{}_{}'.format(state,task),img,epoch)
+        writer.add_image('Images/{}/gt/{}'.format(state,task),gt_img,epoch)
+        writer.add_image('Images/{}/det/{}'.format(state,task),np.clip(img,0,np.max(img)),epoch)
             
     elif task == 'instance_probs':
         if train:
@@ -322,8 +342,8 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         else:
             img = decode_segmap(predictions[task][0,:,:].cpu(),nc=2,labels = prob_labels)
         target = decode_segmap(targets[task][0,:,:].cpu(),nc=2,labels = prob_labels)
-        writer.add_image('Images/gt_{}_{}'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/det_{}_{}'.format(state,task), img,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
         
     
     elif task == 'disparity':
@@ -332,5 +352,5 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         else:
             img = predictions[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
         gt_img = targets[task][0,0,:,:].cpu().unsqueeze(0).numpy().astype(np.uint8)
-        writer.add_image('Images/gt_{}_{}'.format(state,task),gt_img,epoch)
-        writer.add_image('Images/det_{}_{}'.format(state,task),img,epoch)
+        writer.add_image('Images/{}/gt/{}'.format(state,task),gt_img,epoch)
+        writer.add_image('Images/{}/det/{}'.format(state,task),img,epoch)
