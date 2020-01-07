@@ -40,15 +40,12 @@ class runningScore(object):
         acc_cls = np.nanmean(acc_cls)
         iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
         mean_iu = np.nanmean(iu)
-        freq = hist.sum(axis=1) / hist.sum()
-        fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
         cls_iu = dict(zip(range(self.n_classes), iu))
 
         return (
             {
                 "Overall Acc": acc,
                 "Mean Acc": acc_cls,
-                "FreqW Acc": fwavacc,
                 "Mean IoU": mean_iu,
             },
             cls_iu,

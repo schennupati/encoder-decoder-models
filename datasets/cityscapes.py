@@ -12,7 +12,9 @@ import numpy as np
 from collections import namedtuple
 from torchvision import transforms
 from .vision import VisionDataset
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 class Cityscapes(VisionDataset):
     """`Cityscapes <http://www.cityscapes-dataset.com/>`_ Dataset.
 

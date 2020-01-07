@@ -57,7 +57,7 @@ def get_transforms_list(cfg):
 def get_transform_from_name(transform_name,params):
 
     if transform_name == 'Resize':
-        return transforms.Resize(size=params['size'], interpolation=2)
+        return transforms.Resize(size=params['size'], interpolation=Image.NEAREST)
     
     elif transform_name == 'RandomScale':
         return RandomScale(scale=params['scale'])

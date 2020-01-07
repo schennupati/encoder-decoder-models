@@ -59,6 +59,7 @@ def train(cfg):
                                                     val_loss_meters,criterion, 
                                                     val_metrics, epoch,writer)
         print_metrics(val_metrics)
+        val_metrics.reset()
         state,best_loss,plateau_count = save_model(model,optimizer,criterion,cfg,current_loss,
                                                    best_loss,plateau_count,
                                                    start_iter,epoch,state)             

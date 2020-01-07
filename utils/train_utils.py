@@ -25,7 +25,7 @@ from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss
 from utils.im_utils import cat_labels, prob_labels, inst_labels, decode_segmap
 from PIL import Image
 import matplotlib.pyplot as plt
-from instance_to_clusters import get_clusters, imshow_components
+from instance_to_clusters import get_clusters, imshow_components, to_rgb
 import cv2
 
 def get_device(cfg):
@@ -205,11 +205,12 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
             val_losses, val_loss = criterion(outputs,targets)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
-            #break
+            predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
+            val_metrics.update(targets, predictions)
+            #print_metrics(val_metrics)
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))
         if writer:
             writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
-        predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
         for k, v in val_loss_meters.meters.items():
             print("{} loss: {}".format(k, v.avg))
             if writer:
@@ -219,7 +220,7 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         current_loss = running_val_loss.avg
         running_val_loss.reset()
         val_loss_meters.reset()
-        val_metrics.update(targets, predictions)
+        
     
     return val_metrics, current_loss
         
@@ -237,7 +238,7 @@ def print_metrics(val_metrics):
                     [print(prob_labels[k].name,'\t :',v) for k,v in class_iou.items() ]
                 elif task =='instance_contour':
                     [print(inst_labels[k].name,'\t :',v) for k,v in class_iou.items() ]
-    val_metrics.reset()
+
 
 def save_model(model,optimizer,criterion,cfg,current_loss,best_loss,plateau_count,start_iter,epoch,state):
     if current_loss <= best_loss:
@@ -289,7 +290,7 @@ def get_inst_img_from_contours(mask, seg_img, contours):
         diff[:,:,i] = seg_img[:,:,i]*(1-contours)*mask
     
     _, labels = cv2.connectedComponents(diff[:,:,2])
-    instance_img = imshow_components(labels)
+    instance_img = to_rgb(labels)
     return instance_img
 
 def get_pan_img(mask, seg_img, inst_img):
@@ -305,17 +306,17 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
     writer.add_image('Images/{}/Input_image'.format(state),img,epoch,dataformats='CHW')
     
     if task == 'semantic':
-        img = decode_segmap(predictions[task][0,:,:].cpu())
-        target = decode_segmap(targets[task][0,:,:].cpu())
+        img = decode_segmap(predictions[task][0,:,:].detach().cpu())
+        target = decode_segmap(targets[task][0,:,:].detach().cpu())
         writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
         writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
     
     elif task == 'instance_contour':
-        img = decode_segmap(predictions[task][0,:,:].cpu(),nc=11,labels=inst_labels)
+        img = decode_segmap(predictions[task][0,:,:].detach().cpu(),nc=11,labels=inst_labels)
         contours = img[:,:,0]
         contours[contours>0] = 1
 
-        mask = predictions['instance_probs'][0,:,:].cpu().numpy()
+        mask = predictions['instance_probs'][0,:,:].detach().cpu().numpy()
         seg_img = decode_segmap(predictions['semantic'][0,:,:].cpu())
         instance_img = get_inst_img_from_contours(mask, seg_img, contours)
         panoptic_img = get_pan_img(mask, seg_img, instance_img)
