@@ -8,7 +8,7 @@ Created on Fri Jul 19 07:59:23 2019
 import argparse
 from tqdm import tqdm
 
-from utils.data_utils import get_weights, get_cfg
+from utils.data_utils import get_weights, get_cfg, get_class_weights_from_data
 from utils.loss_utils import averageMeter
 from utils.dataloader import get_dataloaders
 from utils.train_utils import get_device, get_config_params, get_model, \

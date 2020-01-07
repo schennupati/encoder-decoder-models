@@ -192,7 +192,7 @@ class _Encoder_Decoder(nn.Module):
             out = self._sliced_concat(class_feats[0], class_feats[1], class_feats[2], class_feats[3], num_classes)
             out = self.ce_fusion(out)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
-            out = torch.sigmoid(out)
+            out = F.relu(out, inplace=True)
             outputs['instance_contour'] = out
         if self.heads['instance_regression']['active']:
             out = self.instance_regression(reg_score)

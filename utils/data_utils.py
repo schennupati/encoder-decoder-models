@@ -110,7 +110,7 @@ def convert_data_type(data,data_type):
         return data.float()
     
 
-def convert_targets(in_targets,cfg,device):
+def convert_targets(in_targets,cfg,device=None):
     #cfg['tasks']
     converted_targets = {} 
     for i,task in enumerate(cfg.keys()):
@@ -144,7 +144,7 @@ def post_process_outputs(outputs, cfg, targets):
             converted_outputs[task] = outputs[task]
     return converted_outputs   
 
-def get_class_weights_from_data(loader,num_classes):
+def get_class_weights_from_data(loader,num_classes,cfg, task):
     trainId_to_count = {}
     for trainId in range(num_classes):
         trainId_to_count[trainId] = 0
@@ -152,9 +152,8 @@ def get_class_weights_from_data(loader,num_classes):
     # get the total number of pixels in all train label_imgs that are of each object class:
     for data in tqdm(loader):
         _,labels = data
-        for label_img in labels: 
-            label_img = convert_targets(label_img, permute =(1,2,0))
-
+        labels = convert_targets(labels,cfg['tasks'])
+        for label_img in labels[task]: 
             for trainId in range(num_classes):
                 # count how many pixels in label_img which are of object class trainId:
                 
@@ -200,6 +199,18 @@ def cityscapes_semantic_weights(num_classes):
     
     return class_weights
 
+def cityscapes_contour_weights(num_classes):
+    if num_classes == 11 :
+        class_weights = [1.427197976828025, 47.66104006965641, 50.0977099173462,
+                         44.04363870779025, 50.31372660864973, 50.31163764506638,
+                         50.47265462912245, 50.471431327406826, 50.36620380700314,
+                         50.32661428022733, 49.834611789928324]
+
+    else:
+        raise ValueError('Invalid number of classes for Cityscapes dataset')
+    
+    return class_weights
+
 def get_weights(cfg,device):
     dataset = cfg['data']['dataset']
     tasks = cfg['model']['outputs']
@@ -207,6 +218,9 @@ def get_weights(cfg,device):
     for task in tasks.keys():
         if dataset == 'Cityscapes' and task == 'semantic':
             weight = cityscapes_semantic_weights(tasks[task]['out_channels'])
+            weights[task] = torch.FloatTensor(weight).to(device)
+        elif dataset == 'Cityscapes' and task == 'instance_contour':
+            weight = cityscapes_contour_weights(tasks[task]['out_channels'])
             weights[task] = torch.FloatTensor(weight).to(device)
         else:
             weights[task] = None
@@ -223,8 +237,9 @@ def get_instance_hw(xs, ys):
     return (abs(vertex_1[0]-vertex_2[0]), abs(vertex_1[1]-vertex_2[1]))
 
 def compute_centroid_vector_torch(instance_image):
-    alpha = 5.0
+    alpha = 10.0
     contours = np.zeros(instance_image.shape)
+    contour_class_map = {i+24: i for i in range(10)}
     instance_image_tensor = torch.Tensor(instance_image)
     centroids_t = torch.zeros(instance_image.shape + (2,))
     w_h = torch.ones(instance_image.shape + (2,))
@@ -233,16 +248,16 @@ def compute_centroid_vector_torch(instance_image):
         xs, ys = xsys[:, 0], xsys[:, 1]
         centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()), torch.mean(ys.float())))
         if value > 1000:
-            #pdb.set_trace()
+            contour_class = contour_class_map[value.numpy()//1000]
             cont = np.array([xs.numpy(), ys.numpy()])
             for x in np.unique(cont[0,:]):
                 idx = np.where(cont[0,:]==x)
-                contours[x, np.min(cont[1,idx])] = 1
-                contours[x, np.max(cont[1,idx])] = 1
+                contours[x, np.min(cont[1,idx])] = contour_class+1
+                contours[x, np.max(cont[1,idx])] = contour_class+1
             for y in np.unique(cont[1,:]):
                 idx = np.where(cont[1,:]==y)
-                contours[np.min(cont[0,idx]), y] = 1
-                contours[np.max(cont[0,idx]), y] = 1
+                contours[np.min(cont[0,idx]), y] = contour_class+1
+                contours[np.max(cont[0,idx]), y] = contour_class+1
             w, h = get_instance_hw(xs, ys)
             if w!=0 and h!=0:
                 w_h[xs, ys,0], w_h[xs, ys,1]  = w.float(), h.float()
@@ -270,8 +285,8 @@ def compute_centroid_vector_torch(instance_image):
     heatmap_[:,:,1] /= w_h[:,:,1]
     heatmap_t = heatmap_[:,:,0]*heatmap_[:,:,1]
     heatmap_t = heatmap_t*mask
-    kernel = np.ones((3,3), np.uint8)
-    contours = cv2.dilate(contours, kernel, iterations=1)
+    #kernel = np.ones((3,3), np.uint8)
+    #contours = cv2.dilate(contours, kernel, iterations=1)
     #print((torch.min(vecs), torch.max(vecs)), (torch.min(heatmap_), torch.max(heatmap_)))
     return vecs.permute(2,0,1), mask, heatmap_t, torch.tensor(contours)
 

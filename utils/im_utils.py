@@ -85,6 +85,21 @@ labels = [
     Label(  'license plate'        , -1 ,       -1 , 'vehicle'         , 7       , False        , True         , (  0,  0,142) ),
 ]
 
+inst_labels = [
+    #       name                    id    trainId   category            catId     hasInstances   ignoreInEval   color
+    Label(  'unlabeled'            , 0 ,       0 , 'void'            , 0       , False        , True         , (  0,  0,  0) ),
+    Label(  'person'               , 1 ,       1 , 'human'           , 6       , True         , False        , (220, 20, 60) ),
+    Label(  'rider'                , 2 ,       2 , 'human'           , 6       , True         , False        , (255,  1,  1) ),
+    Label(  'car'                  , 3 ,       3 , 'vehicle'         , 7       , True         , False        , (  1,  1,142) ),
+    Label(  'truck'                , 4 ,       4 , 'vehicle'         , 7       , True         , False        , (  1,  1, 70) ),
+    Label(  'bus'                  , 5 ,       5 , 'vehicle'         , 7       , True         , False        , (  1, 60,100) ),
+    Label(  'caravan'              , 6 ,       6 , 'vehicle'         , 7       , True         , True         , (  1,  1, 90) ),
+    Label(  'trailer'              , 7 ,       7 , 'vehicle'         , 7       , True         , True         , (  1,  1,110) ),
+    Label(  'train'                , 8 ,       8 , 'vehicle'         , 7       , True         , False        , (  1, 80,100) ),
+    Label(  'motorcycle'           , 9 ,       9 , 'vehicle'         , 7       , True         , False        , (  1,  1,230) ),
+    Label(  'bicycle'              ,10 ,      10 , 'vehicle'         , 7       , True         , False        , (119, 11, 32) )
+]
+
 cat_labels = [
     #       name                     id    trainId   category            catId     hasInstances   ignoreInEval   color
     
@@ -129,11 +144,7 @@ def decode_segmap(image, nc=19, labels =labels):
    
   for l in range(0, nc):
     idx = np.where(image == l)
-   
-    if nc == 2:
-         l = get_trainId(l,labels=prob_labels)
-    elif nc == 19:
-         l = get_trainId(l)
+    l = get_trainId(l,labels=labels)
     r[idx] = labels[l].color[ 0]
     g[idx] = labels[l].color[ 1]
     b[idx] = labels[l].color[ 2]
