@@ -11,11 +11,13 @@ import pdb
 #TODO:Implement MTL loss combinations
 from utils.loss import (cross_entropy2d,bootstrapped_cross_entropy2d,
                         multi_scale_cross_entropy2d,huber_loss,mae_loss,
-                        mse_loss,instance_loss, weighted_binary_cross_entropy)
+                        mse_loss,instance_loss, weighted_binary_cross_entropy,
+                        weighted_multiclass_cross_entropy)
 
 loss_map = {
             'cross_entropy2d' : (cross_entropy2d),
             'weighted_binary_cross_entropy' : (weighted_binary_cross_entropy),
+            'weighted_multiclass_cross_entropy': (weighted_multiclass_cross_entropy),
             'multi_scale_cross_entropy2d' : (multi_scale_cross_entropy2d),
             'bootstrapped_cross_entropy2d': (bootstrapped_cross_entropy2d),
             'huber_loss': (huber_loss),
@@ -95,6 +97,9 @@ class MultiTaskLoss(nn.Module):
         elif loss_fn == 'weighted_binary_cross_entropy':
             weights = self.get_weights(target)
             loss = weighted_binary_cross_entropy(prediction, target.long(), weights=weights)
+        elif loss_fn == 'weighted_multiclass_cross_entropy':
+            weights = self.get_weights(target)
+            loss = weighted_multiclass_cross_entropy(prediction, target.long(), weight=weight,weights=weights)
         elif loss_fn ==  'l1':
             non_zeros = torch.nonzero(target).size(0)
             if prediction.size() !=target.size():
@@ -130,7 +135,9 @@ class MultiTaskLoss(nn.Module):
 
         elif self.loss_type == 'uncertainty':
             for i, task in enumerate(self.losses.keys()):
-                if self.cfg[task]['loss'] == 'cross_entropy2d' or self.cfg[task]['loss'] == 'weighted_binary_cross_entropy':
+                if self.cfg[task]['loss'] == 'cross_entropy2d' or \
+                   self.cfg[task]['loss'] == 'weighted_binary_cross_entropy' or \
+                   self.cfg[task]['loss'] == 'weighted_multiclass_cross_entropy':
                     loss += torch.exp(-self.sigma[i])*self.losses[task] + 0.5*self.sigma[i]
                 elif self.cfg[task]['loss'] == 'l1' or self.cfg[task]['loss'] == 'l2':
                     loss += 0.5*(torch.exp(-self.sigma[i])*self.losses[task] + self.sigma[i])

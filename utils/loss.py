@@ -35,13 +35,66 @@ def cross_entropy2d(input, target, weight=None, size_average=True):
         input, target, weight=weight, ignore_index=255)
     return loss
 
+def make_one_hot(labels, num_classes=11):
+    n,h,w = labels.size()
+    one_hot = torch.zeros((n, num_classes,h, w), dtype=labels.dtype)
+    # handle ignore labels
+    for class_id in range(num_classes):
+        one_hot[:, class_id,...] = (labels==class_id)
+    return one_hot.to(labels.get_device())
+
+def dice_loss(input_soft: torch.Tensor, target: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Function that computes Sørensen-Dice Coefficient loss.
+
+    See :class:`~kornia.losses.DiceLoss` for details.
+    """
+    if not torch.is_tensor(input_soft):
+        raise TypeError("Input type is not a torch.Tensor. Got {}"
+                        .format(type(input_soft)))
+
+    if not len(input_soft.shape) == 4:
+        raise ValueError("Invalid input shape, we expect BxNxHxW. Got: {}"
+                         .format(input_soft.shape))
+
+    if not input_soft.shape[-2:] == input_soft.shape[-2:]:
+        raise ValueError("input and target shapes must be the same. Got: {}"
+                         .format(input_soft.shape, input_soft.shape))
+
+    if not input_soft.device == target.device:
+        raise ValueError(
+            "input and target must be in the same device. Got: {}" .format(
+                input_soft.device, target.device))
+    
+    # compute the actual dice score
+    dims = (1, 2, 3)
+    intersection = torch.sum(input_soft * target, dims)
+    cardinality = torch.sum(input_soft + target, dims)
+
+    dice_score =   2. * intersection/(cardinality + eps)
+    return torch.mean(-dice_score + 1.)
+
+
+def weighted_multiclass_cross_entropy(input, target, weight=None, weights=None):
+    
+    if len(input.size()) == 4:
+        n, c, h, w = input.size()
+    else:
+        c, h, w = input.size()
+    if weight is None:
+        weight = [1 for i in range(c)]
+    input_soft = torch.sigmoid(input)
+    target_onehot = F.one_hot(target,num_classes=c).permute(0,3,1,2)
+    lc = cross_entropy2d(input, target.long(), weight=weight)
+    ld = dice_loss(input_soft, target_onehot)
+    l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
+    return lc + ld + l2
+
 def weighted_binary_cross_entropy(input, target, weights=None):
     #input, target = flatten_data(input, target)
     if weights is not None:
         assert len(weights) == 2
-        
         loss = weights[0] * (target * torch.log(input)) + \
-               weights[1] * ((1 - target) * torch.log(1 - input))
+            weights[1] * ((1 - target) * torch.log(1 - input))
     else:
         loss = target * torch.log(input) + (1 - target) * torch.log(1 - input)
 

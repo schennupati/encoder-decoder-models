@@ -340,35 +340,18 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
     elif task == 'instance_regression':
         if train:
             vecs = outputs[task][0,:,:,:].detach().cpu().numpy()
-            mask = predictions['instance_probs'][0,:,:].detach().cpu().numpy()
-            heatmap = outputs['instance_heatmap'][0,:,:].detach().cpu().numpy()
             img = get_color_inst(vecs.transpose(1,2,0))
         else:
             vecs = outputs[task][0,:,:,:].cpu().numpy()
-            mask = predictions['instance_probs'][0,:,:].cpu().numpy()
-            heatmap = outputs['instance_heatmap'][0,:,:].cpu().numpy()
             img = get_color_inst(vecs.transpose(1,2,0))
         
-        seg_img = decode_segmap(predictions['semantic'][0,:,:].cpu())
-        inst_img = get_clusters(vecs, mask, np.clip(heatmap[0],0,np.max(heatmap)))
-        panoptic_img = get_pan_img(mask, seg_img, inst_img)
 
         gt_vecs = targets[task][0,:,:,:].cpu().numpy()
-        gt_mask = targets['instance_probs'][0,:,:].cpu().numpy()
-        gt_heatmap = targets['instance_heatmap'][0,:,:].cpu().unsqueeze(0).numpy()
         gt_img = get_color_inst(gt_vecs.transpose(1,2,0))
-        gt_inst_img = get_clusters(gt_vecs, gt_mask, gt_heatmap[0])
-        gt_seg_img = decode_segmap(targets['semantic'][0,:,:].cpu())
-        gt_panoptic_img = get_pan_img(gt_mask, gt_seg_img, gt_inst_img)
         
 
         writer.add_image('Images/{}/gt/{}_vecs'.format(state,task),gt_img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/{}_instance'.format(state,task),gt_inst_img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/panoptic_seg_centroid'.format(state,task), gt_panoptic_img,epoch,dataformats='HWC')
-
         writer.add_image('Images/{}/det/{}_vecs'.format(state,task),img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det_{}_instance'.format(state,task),inst_img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det/panoptic_seg_centroid'.format(state,task), panoptic_img, epoch,dataformats='HWC')
         
         
     elif task == 'instance_heatmap':

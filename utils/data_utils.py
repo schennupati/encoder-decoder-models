@@ -345,26 +345,33 @@ def get_instance_hw(xs, ys):
 def compute_centroid_vector_torch(instance_image):
     alpha = 10.0
     contours = np.zeros(instance_image.shape)
-    contour_class_map = {i+24: i for i in range(10)}
+    contour_class_map = {i+24: i+1 for i in range(10)}
     instance_image_tensor = torch.Tensor(instance_image)
     centroids_t = torch.zeros(instance_image.shape + (2,))
     w_h = torch.ones(instance_image.shape + (2,))
     for value in torch.unique(instance_image_tensor):
+        cont_mask = np.zeros_like(instance_image)
         xsys = torch.nonzero(instance_image_tensor == value)
         xs, ys = xsys[:, 0], xsys[:, 1]
         centroids_t[xs, ys] = torch.stack(
             (torch.mean(xs.float()), torch.mean(ys.float())))
         if value > 1000:
-            contour_class = contour_class_map[value.numpy()//1000]
+            contour_class = contour_class_map[int(value.numpy()//1000)]
+            cont_mask[np.where(instance_image == value)] = 255
+            cont_img = np.zeros(instance_image.shape)
+            _,thresh = cv2.threshold(cont_mask,127,255,0)
+            cnts, _ = cv2.findContours(thresh.astype(np.uint8),cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
+            contours[np.where(cont_img==1.0)] = contour_class
             cont = np.array([xs.numpy(), ys.numpy()])
             for x in np.unique(cont[0, :]):
                 idx = np.where(cont[0, :] == x)
-                contours[x, np.min(cont[1, idx])] = contour_class+1
-                contours[x, np.max(cont[1, idx])] = contour_class+1
+                contours[x, np.min(cont[1, idx])] = contour_class
+                contours[x, np.max(cont[1, idx])] = contour_class
             for y in np.unique(cont[1, :]):
                 idx = np.where(cont[1, :] == y)
-                contours[np.min(cont[0, idx]), y] = contour_class+1
-                contours[np.max(cont[0, idx]), y] = contour_class+1
+                contours[np.min(cont[0, idx]), y] = contour_class
+                contours[np.max(cont[0, idx]), y] = contour_class
             w, h = get_instance_hw(xs, ys)
             if w != 0 and h != 0:
                 w_h[xs, ys, 0], w_h[xs, ys, 1] = w.float(), h.float()

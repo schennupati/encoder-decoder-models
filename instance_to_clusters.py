@@ -330,6 +330,13 @@ def compute_instance_contours_open_cv(instance_image):
             contour_class = contour_class_map[value//1000]
             contours[np.where(cont_img==1.0)] = contour_class
     contours = decode_segmap(contours, nc=11, labels=inst_labels)
+    plt.imshow(contours)
+    plt.show()
+    contours[contours>0] = 1
+    laplacian = cv2.Laplacian(contours,cv2.CV_64F)
+    plt.imshow(laplacian)
+    plt.show()
+    print(np.unique(laplacian))
     return contours
 
 def imshow_components(labels):
@@ -360,7 +367,7 @@ def plot_images(identifier):
     #save_plot(seg_img, identifier +'_seg_image.png')
 
     inst_img = cv2.imread(os.path.join(root,annot,split,city,identifier+instance_tag),-1)
-    contours = compute_instance_contours(inst_img)
+    #contours = compute_instance_contours(inst_img)
     contours = compute_instance_contours_open_cv(inst_img)
 
     #save_plot(contours, identifier +'_contours_image.png')
@@ -394,5 +401,6 @@ def plot_images(identifier):
     plt.imshow(pan_img)
     plt.show()
     #save_plot(pan_img, identifier +'_panoptic_seg.png')
-#plot_images(identifier)
+    if __name__ == "__main__":
+        plot_images(identifier)
     

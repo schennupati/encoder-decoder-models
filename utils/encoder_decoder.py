@@ -26,8 +26,8 @@ __all__ = ['FCN']
 inplanes_map = {
                 'resnet':
                          {
-                          'resnet18':[512,256,128],'resnet34':[512,256,128],
-                          'resnet50':[2048,1024,512],'resnet101':[2048,1024,512],
+                          'resnet18':[512,256,128,64],'resnet34':[512,256,128,64],
+                          'resnet50':[2048,1024,512,256],'resnet101':[2048,1024,512,256],
                           'resnet152':[2048,1024,512],'resnext50_32x4d':[2048,1024,512],
                           'resnext101_32x8d':[2048,1024,512],'wide_resnet50_2':[2048,1024,512],
                           'wide_resnet101_2':[2048,1024,512]
@@ -69,18 +69,16 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     if 'resnet' in encoder_name:
         if encoder_name in ['resnet18','resnet34'] and decoder_name=='fpn':
             raise ValueError('{} is not supported with fpn'.format(encoder_name))
+        return_layers = {'relu': 'out_0','layer1': 'out_1','layer2': 'out_2','layer3': 'out_3','layer4': 'out_final'}
+        encoder = resnet.__dict__[encoder_name](pretrained=pretrained_backbone,
+                                 replace_stride_with_dilation=[False, False, False])       
+        encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
+        inplanes = inplanes_map['resnet'][encoder_name]
         if decoder_name == 'fpn':
-            encoder    = resnet_fpn_backbone(encoder_name,pretrained=True)
-            inplanes   = [256,256,256,256]
             outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fpn']
             
         elif decoder_name == 'fcn':
-            return_layers = {'layer2': 'out_1','layer3': 'out_2','layer4': 'out_final'}
-            encoder = resnet.__dict__[encoder_name](pretrained=pretrained_backbone,
-                                 replace_stride_with_dilation=[False, False, False])       
-            encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
-            inplanes = inplanes_map['resnet'][encoder_name]
             outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fcn']
             
@@ -139,9 +137,7 @@ def get_intermediate_result(model, output):
     decoder= model['decoder']
     intermediate_result = OrderedDict()
     layers = [k for k,_ in output.items()]
-    if 'resnet' in encoder and 'fpn' in decoder:
-        layers = layers[:-1]
-    elif 'efficientnet' in encoder and 'fcn' in decoder:
+    if 'efficientnet' in encoder and 'fcn' in decoder:
         layers = layers[1:]
     else: 
         layers = layers
@@ -164,6 +160,11 @@ class _Encoder_Decoder(nn.Module):
                                          self.heads['semantic']['out_channels'])
         if self.heads['instance_contour']['active']:
             num_classes = self.heads['instance_contour']['out_channels']
+            self.score_edge_side1 = SideOutputCrop(64)
+            self.score_edge_side2 = SideOutputCrop(256, kernel_sz=4, stride=2, upconv_pad=1, do_crops=False)
+            self.score_edge_side3 = SideOutputCrop(512, kernel_sz=8, stride=4, upconv_pad=2, do_crops=False)
+            self.score_cls_side5 = Res5OutputCrop(kernel_sz=16, stride=16, nclasses=num_classes, upconv_pad=0,
+                                                 do_crops=False)
             self.ce_fusion = nn.Conv2d(4*num_classes, num_classes, groups=num_classes, kernel_size=1, stride=1, padding=0,
                                    bias=True)
         if self.heads['instance_regression']['active']:
@@ -178,6 +179,7 @@ class _Encoder_Decoder(nn.Module):
         
     def forward(self, x):
         outputs = {}
+        input_data = x
         x = self.encoder(x)
         intermediate_result, layers = get_intermediate_result(self.model, x)
         class_score, class_feats = self.class_decoder(intermediate_result,layers)
@@ -189,10 +191,22 @@ class _Encoder_Decoder(nn.Module):
             outputs['semantic'] = out
         if self.heads['instance_contour']['active']:
             num_classes = self.heads['instance_contour']['out_channels']
-            out = self._sliced_concat(class_feats[0], class_feats[1], class_feats[2], class_feats[3], num_classes)
+            side1 = self.score_edge_side1(intermediate_result[layers[0]], input_data)
+            side2 = self.score_edge_side2(intermediate_result[layers[1]], input_data)
+            side3 = self.score_edge_side3(intermediate_result[layers[2]], input_data)
+            side5 = self.score_cls_side5(intermediate_result[layers[4]], input_data)
+            # for key in intermediate_result.keys():
+            #     print(key, intermediate_result[key].size())
+            # print('##########')    
+            # print(side1.size())
+            # print(side2.size())
+            # print(side3.size())
+            # print(side5.size())
+            out = self._sliced_concat(side1, side2, side3, side5, num_classes)
             out = self.ce_fusion(out)
-            out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
-            out = F.relu(out, inplace=True)
+            out = F.interpolate(out, scale_factor= 2, mode='bilinear', align_corners=True)
+            #out = F.softmax(out, dim=1)
+            #out = torch.sigmoid(out)
             outputs['instance_contour'] = out
         if self.heads['instance_regression']['active']:
             out = self.instance_regression(reg_score)
@@ -250,3 +264,68 @@ class Encoder_Decoder(_Encoder_Decoder):
     """
     pass
 
+class SideOutputCrop(nn.Module):
+    """
+    This is the original implementation ConvTranspose2d (fixed) and crops
+    """
+
+    def __init__(self, num_output, kernel_sz=None, stride=None, upconv_pad=0, do_crops=True):
+        super(SideOutputCrop, self).__init__()
+        self._do_crops = do_crops
+        self.conv = nn.Conv2d(num_output, out_channels=1, kernel_size=1, stride=1, padding=0, bias=True)
+
+        if kernel_sz is not None:
+            self.upsample = True
+            self.upsampled = nn.ConvTranspose2d(1, out_channels=1, kernel_size=kernel_sz, stride=stride,
+                                                padding=upconv_pad,
+                                                bias=False)
+            ##doing crops
+            if self._do_crops:
+                self.crops = Crop(2, offset=kernel_sz // 4)
+            else:
+                self.crops = MyIdentity(None, None)
+        else:
+            self.upsample = False
+
+    def forward(self, res, reference=None):
+        side_output = self.conv(res)
+        if self.upsample:
+            side_output = self.upsampled(side_output)
+            side_output = self.crops(side_output, reference)
+
+        return side_output
+
+
+class Res5OutputCrop(nn.Module):
+
+    def __init__(self, in_channels=2048, kernel_sz=16, stride=8, nclasses=20, upconv_pad=0, do_crops=True):
+        super(Res5OutputCrop, self).__init__()
+        self._do_crops = do_crops
+        self.conv = nn.Conv2d(in_channels, nclasses, kernel_size=1, stride=1, padding=0, bias=True)
+        self.upsampled = nn.ConvTranspose2d(nclasses, out_channels=nclasses, kernel_size=kernel_sz, stride=stride,
+                                            padding=upconv_pad,
+                                            bias=False, groups=nclasses)
+        if self._do_crops is True:
+            self.crops = Crop(2, offset=kernel_sz // 4)
+        else:
+            self.crops = MyIdentity(None, None)
+
+    def forward(self, res, reference):
+        res = self.conv(res)
+        res = self.upsampled(res)
+        res = self.crops(res, reference)
+        return res
+
+class MyIdentity(nn.Module):
+    def __init__(self, axis, offset):
+        super(MyIdentity, self).__init__()
+        self.axis = axis
+        self.offset = offset
+
+    def forward(self, x, ref):
+        """
+        :param x: input layer
+        :param ref: reference usually data in
+        :return:
+        """
+        return x
