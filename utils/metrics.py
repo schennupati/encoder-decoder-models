@@ -39,6 +39,16 @@ class runningScore(object):
         acc_cls = np.diag(hist) / hist.sum(axis=1)
         acc_cls = np.nanmean(acc_cls)
         iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
+        # Calc TP. FP and FN
+        tp = np.sum((iu > 0.5).astype(np.float))
+        fp = ((hist.sum(axis=1) > 0) & (iu < 0.5)).astype(np.float).sum()
+        fn = ((hist.sum(axis=0) > 0) & (iu < 0.5)).astype(np.float).sum()
+        
+        # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
+        sq = np.sum(iu[iu>0.5]) / tp
+        rq = tp / (tp + 0.5 * fp + 0.5 * fn)
+        pq = sq * rq
+
         mean_iu = np.nanmean(iu)
         cls_iu = dict(zip(range(self.n_classes), iu))
 
@@ -47,6 +57,9 @@ class runningScore(object):
                 "Overall Acc": acc,
                 "Mean Acc": acc_cls,
                 "Mean IoU": mean_iu,
+                "SQ": sq,
+                "RQ": rq,
+                "PQ": pq,
             },
             cls_iu,
         )
