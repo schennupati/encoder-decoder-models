@@ -39,6 +39,16 @@ class runningScore(object):
         acc_cls = np.diag(hist) / hist.sum(axis=1)
         acc_cls = np.nanmean(acc_cls)
         iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
+        # Calc TP. FP and FN
+        tp = np.sum((iu > 0.5).astype(np.float))
+        fp = ((hist.sum(axis=1) > 0) & (iu < 0.5)).astype(np.float).sum()
+        fn = ((hist.sum(axis=0) > 0) & (iu < 0.5)).astype(np.float).sum()
+        
+        # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
+        sq = np.sum(iu[iu>0.5]) / tp
+        rq = tp / (tp + 0.5 * fp + 0.5 * fn)
+        pq = sq * rq
+
         mean_iu = np.nanmean(iu)
         cls_iu = dict(zip(range(self.n_classes), iu))
 
@@ -47,6 +57,9 @@ class runningScore(object):
                 "Overall Acc": acc,
                 "Mean Acc": acc_cls,
                 "Mean IoU": mean_iu,
+                "SQ": sq,
+                "RQ": rq,
+                "PQ": pq,
             },
             cls_iu,
         )
@@ -87,7 +100,79 @@ class regressionAccruacy(object):
         self.acc_2 = 0.0
         self.acc_3 = 0.0
         
-        
+class panopticMetrics(object):
+    def __init__(self, n_classes=19):
+        self.n_classes = n_classes
+        self.OFFSET = 256*256*256
+        self.reset()
+
+    def convert_color_to_index(self, colors):
+        if colors.size(-1) != 3:
+            colors.permute(0, 3, 1, 2)
+        colors = colors[:, :, :, 0] + 256 * colors[:, :, :, 1] + 256 * 256 * colors[:, :, :, 2]
+
+        return colors
+
+    def _fast_hist(self, label_true, label_pred, n_class):
+        mask = label_true > 1000 # ignore crowd segments
+        hist = np.bincount(
+            self.OFFSET * label_true[mask].astype(int) + label_pred[mask], minlength=n_class ** 2
+        ).reshape(n_class, n_class)
+        return hist
+
+    def update(self, label_trues, label_preds):
+        label_trues = self.convert_color_to_index(label_trues)
+        label_preds = self.convert_color_to_index(label_preds)
+        for lt, lp in zip(label_trues, label_preds):
+            hist = self._fast_hist(lt.flatten(), lp.flatten(), self.n_classes)
+            iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
+            self.metrics['iu'] += iu * (iu > 0.5).astype(np.float)
+            self.metrics['tp'] += (iu > 0.5).astype(np.float)
+            self.metrics['fp'] += (((hist.sum(axis=1) - np.diag(hist)) > 0) & (iu < 0.5)).astype(np.float)
+            self.metrics['fn'] += (((hist.sum(axis=0) - np.diag(hist)) > 0) & (iu < 0.5)).astype(np.float)
+            
+    def get_scores(self):
+        """Returns accuracy score evaluation result.
+            - PQ
+            - RQ
+            - Sq
+            - mean_iu
+        """
+        # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
+        sq = self.metrics['iu'] / self.metrics['tp']
+        rq = self.metrics['tp'] / (self.metrics['tp'] + 0.5 * self.metrics['fp'] + 0.5 * self.metrics['fn'])
+        pq = sq * rq
+
+        mean_iu = np.nanmean(self.metrics['iu'])
+        mean_sq = np.nanmean(sq)
+        mean_rq = np.nanmean(rq)
+        mean_pq = np.nanmean(pq)
+        cls_metrics = {
+            'classes': np.arange(self.n_classes),
+            'iu': self.metrics['iu'],
+            'pq': pq,
+            'rq': rq,
+            'sq': sq
+        }
+
+        return (
+            {
+                "Mean PQ": mean_pq,
+                "Mean RQ": mean_rq,
+                "Mean SQ": mean_sq,
+                "Mean IU": mean_iu
+            },
+            cls_metrics,
+        )
+
+    def reset(self):
+        empty_np = np.zeros(self.n_classes)
+        self.metrics = {'iu': empty_np, 
+                        'tp': empty_np, 
+                        'fp': empty_np, 
+                        'fn': empty_np}
+
+
 class metrics:
     def __init__(self,cfg):
         self.cfg = cfg    
@@ -100,6 +185,9 @@ class metrics:
                 metrics[task] = runningScore(self.cfg[task]['out_channels'])
             elif self.cfg[task]['metric'] == 'regression_metrics' and self.cfg[task]['active']:
                 metrics[task] = regressionAccruacy()
+            elif self.cfg[task]['metric'] == 'panoptic_metrics' and self.cfg[task]['active']:
+                # TODO: Send the number of panoptic classes from cfg
+                metrics[task] = panopticMetrics(19)
             else:
                 metrics[task] = None
         return metrics
