@@ -9,6 +9,7 @@ Created on Wed Jul 24 08:41:09 2019
 
 import numpy as np
 import torch
+from im_utils import panid2label
 
 class runningScore(object):
     def __init__(self, n_classes):
@@ -87,7 +88,85 @@ class regressionAccruacy(object):
         self.acc_2 = 0.0
         self.acc_3 = 0.0
         
-        
+class panopticMetrics(object):
+    def __init__(self):
+        self.OFFSET = 256*256*256
+        self.reset()
+
+    def convert_color_to_index(self, colors):
+        if colors.size(-1) != 3:
+            colors.permute(0, 3, 1, 2)
+        colors = colors[:, :, :, 0] + 256 * colors[:, :, :, 1] + 256 * 256 * colors[:, :, :, 2]
+        batch_size = colors.shape[0]
+        colors = colors.reshape(batch_size, -1)
+        return colors
+
+    def update(self, label_true, label_preds):
+        label_true = self.convert_color_to_index(label_true)
+        label_preds = self.convert_color_to_index(label_preds)
+        combined_labels = label_true * self.OFFSET + label_preds
+        comb_labels, comb_label_cnt = np.unique(combined_labels, return_counts=True)
+        for label, cnts in zip(comb_labels, comb_label_cnt):
+            true_label = label // self.OFFSET
+            pred_label = label % self.OFFSET
+            true_cat_id = panid2label[true_label]['catId']
+            pred_cat_id = panid2label[pred_label]['catId']
+            # TODO: Ignore 'Crowd' classes
+            if true_label == pred_label:
+                union = np.where(label_preds == pred_label).sum() + np.where(label_true == true_label).sum() - cnts
+                iou = cnts / union
+                if iou > 0.5:
+                    self.metrics['iu'][true_cat_id] = self.metrics['iu'].get(true_cat_id, 0) + iou
+                    self.metrics['tp'][true_cat_id] = self.metrics['tp'].get(true_cat_id, 0) + 1
+            else:
+                self.metrics['fn'][true_cat_id] = self.metrics['fn'].get(true_cat_id, 0) + 1
+                self.metrics['fp'][pred_cat_id] = self.metrics['fp'].get(pred_cat_id, 0) + 1    
+            
+    def get_scores(self):
+        """Returns accuracy score evaluation result.
+            - PQ
+            - RQ
+            - SQ
+            - mean_iu
+        """
+        # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
+        iu_nparray = np.array(self.metrics['iu'].values())
+        tp_nparray = np.array(self.metrics['tp'].values())
+        fp_nparray = np.array(self.metrics['fp'].values())
+        fn_nparray = np.array(self.metrics['fn'].values())
+        sq = iu_nparray / tp_nparray
+        rq = tp_nparray / (tp_nparray + 0.5 * fp_nparray + 0.5 * fn_nparray)
+        pq = sq * rq
+
+        mean_iu = np.nanmean(iu_nparray)
+        mean_sq = np.nanmean(sq)
+        mean_rq = np.nanmean(rq)
+        mean_pq = np.nanmean(pq)
+        cls_metrics = {
+            'classes': np.arange(self.n_classes),
+            'iu': self.metrics['iu'],
+            'pq': pq,
+            'rq': rq,
+            'sq': sq
+        }
+
+        return (
+            {
+                "Mean PQ": mean_pq,
+                "Mean RQ": mean_rq,
+                "Mean SQ": mean_sq,
+                "Mean IU": mean_iu
+            },
+            cls_metrics,
+        )
+
+    def reset(self):
+        self.metrics = {'iu': {}, 
+                        'tp': {}, 
+                        'fp': {}, 
+                        'fn': {}}
+
+
 class metrics:
     def __init__(self,cfg):
         self.cfg = cfg    
@@ -100,6 +179,9 @@ class metrics:
                 metrics[task] = runningScore(self.cfg[task]['out_channels'])
             elif self.cfg[task]['metric'] == 'regression_metrics' and self.cfg[task]['active']:
                 metrics[task] = regressionAccruacy()
+            elif self.cfg[task]['metric'] == 'panoptic_metrics' and self.cfg[task]['active']:
+                # TODO: Send the number of panoptic classes from cfg
+                metrics[task] = panopticMetrics()
             else:
                 metrics[task] = None
         return metrics
