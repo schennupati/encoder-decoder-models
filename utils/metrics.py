@@ -9,6 +9,7 @@ Created on Wed Jul 24 08:41:09 2019
 
 import numpy as np
 import torch
+from im_utils import panid2label
 
 class runningScore(object):
     def __init__(self, n_classes):
@@ -39,16 +40,6 @@ class runningScore(object):
         acc_cls = np.diag(hist) / hist.sum(axis=1)
         acc_cls = np.nanmean(acc_cls)
         iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
-        # Calc TP. FP and FN
-        tp = np.sum((iu > 0.5).astype(np.float))
-        fp = ((hist.sum(axis=1) > 0) & (iu < 0.5)).astype(np.float).sum()
-        fn = ((hist.sum(axis=0) > 0) & (iu < 0.5)).astype(np.float).sum()
-        
-        # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
-        sq = np.sum(iu[iu>0.5]) / tp
-        rq = tp / (tp + 0.5 * fp + 0.5 * fn)
-        pq = sq * rq
-
         mean_iu = np.nanmean(iu)
         cls_iu = dict(zip(range(self.n_classes), iu))
 
@@ -57,9 +48,6 @@ class runningScore(object):
                 "Overall Acc": acc,
                 "Mean Acc": acc_cls,
                 "Mean IoU": mean_iu,
-                "SQ": sq,
-                "RQ": rq,
-                "PQ": pq,
             },
             cls_iu,
         )
@@ -101,8 +89,7 @@ class regressionAccruacy(object):
         self.acc_3 = 0.0
         
 class panopticMetrics(object):
-    def __init__(self, n_classes=19):
-        self.n_classes = n_classes
+    def __init__(self):
         self.OFFSET = 256*256*256
         self.reset()
 
@@ -110,40 +97,48 @@ class panopticMetrics(object):
         if colors.size(-1) != 3:
             colors.permute(0, 3, 1, 2)
         colors = colors[:, :, :, 0] + 256 * colors[:, :, :, 1] + 256 * 256 * colors[:, :, :, 2]
-
+        batch_size = colors.shape[0]
+        colors = colors.reshape(batch_size, -1)
         return colors
 
-    def _fast_hist(self, label_true, label_pred, n_class):
-        mask = label_true > 1000 # ignore crowd segments
-        hist = np.bincount(
-            self.OFFSET * label_true[mask].astype(int) + label_pred[mask], minlength=n_class ** 2
-        ).reshape(n_class, n_class)
-        return hist
-
-    def update(self, label_trues, label_preds):
-        label_trues = self.convert_color_to_index(label_trues)
+    def update(self, label_true, label_preds):
+        label_true = self.convert_color_to_index(label_true)
         label_preds = self.convert_color_to_index(label_preds)
-        for lt, lp in zip(label_trues, label_preds):
-            hist = self._fast_hist(lt.flatten(), lp.flatten(), self.n_classes)
-            iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
-            self.metrics['iu'] += iu * (iu > 0.5).astype(np.float)
-            self.metrics['tp'] += (iu > 0.5).astype(np.float)
-            self.metrics['fp'] += (((hist.sum(axis=1) - np.diag(hist)) > 0) & (iu < 0.5)).astype(np.float)
-            self.metrics['fn'] += (((hist.sum(axis=0) - np.diag(hist)) > 0) & (iu < 0.5)).astype(np.float)
+        combined_labels = label_true * self.OFFSET + label_preds
+        comb_labels, comb_label_cnt = np.unique(combined_labels, return_counts=True)
+        for label, cnts in zip(comb_labels, comb_label_cnt):
+            true_label = label // self.OFFSET
+            pred_label = label % self.OFFSET
+            true_cat_id = panid2label[true_label]['catId']
+            pred_cat_id = panid2label[pred_label]['catId']
+            # TODO: Ignore 'Crowd' classes
+            if true_label == pred_label:
+                union = np.where(label_preds == pred_label).sum() + np.where(label_true == true_label).sum() - cnts
+                iou = cnts / union
+                if iou > 0.5:
+                    self.metrics['iu'][true_cat_id] = self.metrics['iu'].get(true_cat_id, 0) + iou
+                    self.metrics['tp'][true_cat_id] = self.metrics['tp'].get(true_cat_id, 0) + 1
+            else:
+                self.metrics['fn'][true_cat_id] = self.metrics['fn'].get(true_cat_id, 0) + 1
+                self.metrics['fp'][pred_cat_id] = self.metrics['fp'].get(pred_cat_id, 0) + 1    
             
     def get_scores(self):
         """Returns accuracy score evaluation result.
             - PQ
             - RQ
-            - Sq
+            - SQ
             - mean_iu
         """
         # Calc Panoptic metrics (SQ, RQ, PQ) (https://arxiv.org/pdf/1801.00868.pdf)
-        sq = self.metrics['iu'] / self.metrics['tp']
-        rq = self.metrics['tp'] / (self.metrics['tp'] + 0.5 * self.metrics['fp'] + 0.5 * self.metrics['fn'])
+        iu_nparray = np.array(self.metrics['iu'].values())
+        tp_nparray = np.array(self.metrics['tp'].values())
+        fp_nparray = np.array(self.metrics['fp'].values())
+        fn_nparray = np.array(self.metrics['fn'].values())
+        sq = iu_nparray / tp_nparray
+        rq = tp_nparray / (tp_nparray + 0.5 * fp_nparray + 0.5 * fn_nparray)
         pq = sq * rq
 
-        mean_iu = np.nanmean(self.metrics['iu'])
+        mean_iu = np.nanmean(iu_nparray)
         mean_sq = np.nanmean(sq)
         mean_rq = np.nanmean(rq)
         mean_pq = np.nanmean(pq)
@@ -166,11 +161,10 @@ class panopticMetrics(object):
         )
 
     def reset(self):
-        empty_np = np.zeros(self.n_classes)
-        self.metrics = {'iu': empty_np, 
-                        'tp': empty_np, 
-                        'fp': empty_np, 
-                        'fn': empty_np}
+        self.metrics = {'iu': {}, 
+                        'tp': {}, 
+                        'fp': {}, 
+                        'fn': {}}
 
 
 class metrics:
@@ -187,7 +181,7 @@ class metrics:
                 metrics[task] = regressionAccruacy()
             elif self.cfg[task]['metric'] == 'panoptic_metrics' and self.cfg[task]['active']:
                 # TODO: Send the number of panoptic classes from cfg
-                metrics[task] = panopticMetrics(19)
+                metrics[task] = panopticMetrics()
             else:
                 metrics[task] = None
         return metrics
