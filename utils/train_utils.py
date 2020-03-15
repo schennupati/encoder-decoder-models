@@ -179,7 +179,7 @@ def train_step(model,data,optimizer,cfg,device,weights,running_loss,
         if writer:
             writer.add_scalar('Loss/train', running_loss.avg, epoch*n_steps + step)
         loss_str = "epoch: {} batch: {} loss: {}".format(epoch + 1, step , running_loss.avg)
-        predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
+        predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets, device)
         
         for k, v in train_loss_meters.meters.items():
             loss_str += " {}_loss: {}".format(k, v.avg)
@@ -205,7 +205,7 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
             val_losses, val_loss = criterion(outputs,targets)
             val_loss_meters.update(val_losses)
             running_val_loss.update(val_loss)
-            predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets)
+            predictions = post_process_outputs(outputs,cfg['model']['outputs'], targets, device)
             val_metrics.update(targets, predictions)
             #print_metrics(val_metrics)
         print("\nepoch: {} validation_loss: {}".format(epoch + 1, running_val_loss.avg))

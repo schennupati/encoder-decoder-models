@@ -167,7 +167,7 @@ trainId2label   = { label.trainId : label for label in reversed(labels) }
 # category to list of label objects
 category2labels = {}
 # Color to panoptic ID
-panid2label = {l.color[0]+256*l.color[1]+256*256*l.color[2]: l for l in labels }
+panid2label = { l.color[0]+ 256*l.color[1]+ 256*256*l.color[2] : l for l in labels }
 
 
 for label in labels:

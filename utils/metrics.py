@@ -94,26 +94,29 @@ class panopticMetrics(object):
         self.reset()
 
     def convert_color_to_index(self, colors):
-        if colors.size(-1) != 3:
-            colors.permute(0, 3, 1, 2)
+        if colors.shape[-1] != 3:
+            np.transpose(colors, (0, 3, 1, 2))
         colors = colors[:, :, :, 0] + 256 * colors[:, :, :, 1] + 256 * 256 * colors[:, :, :, 2]
         batch_size = colors.shape[0]
         colors = colors.reshape(batch_size, -1)
         return colors
 
     def update(self, label_true, label_preds):
+        #import pdb; pdb.set_trace()
+        #print(label_true)
+        #print(label_preds)
         label_true = self.convert_color_to_index(label_true)
         label_preds = self.convert_color_to_index(label_preds)
         combined_labels = label_true * self.OFFSET + label_preds
         comb_labels, comb_label_cnt = np.unique(combined_labels, return_counts=True)
         for label, cnts in zip(comb_labels, comb_label_cnt):
-            true_label = label // self.OFFSET
-            pred_label = label % self.OFFSET
-            true_cat_id = panid2label[true_label]['catId']
-            pred_cat_id = panid2label[pred_label]['catId']
+            true_label = int(label // self.OFFSET)
+            pred_label = int(label % self.OFFSET)
+            true_cat_id = panid2label[true_label].categoryId
+            pred_cat_id = panid2label[pred_label].categoryId
             # TODO: Ignore 'Crowd' classes
             if true_label == pred_label:
-                union = np.where(label_preds == pred_label).sum() + np.where(label_true == true_label).sum() - cnts
+                union = (label_preds == pred_label).sum() + (label_true == true_label).sum() - cnts
                 iou = cnts / union
                 if iou > 0.5:
                     self.metrics['iu'][true_cat_id] = self.metrics['iu'].get(true_cat_id, 0) + iou
@@ -189,8 +192,12 @@ class metrics:
     def update(self,label_trues, label_preds):
         for task in self.cfg.keys():
             if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
-                gt = label_trues[task].data.cpu().numpy()
-                pred = label_preds[task].data.cpu().numpy()
+                if self.cfg[task]['metric'] == 'panoptic_metrics':
+                    gt = label_trues['panoptic'].cpu().numpy()
+                    pred = label_preds['panoptic'].cpu().numpy()
+                else:
+                    gt = label_trues[task].data.cpu().numpy()
+                    pred = label_preds[task].data.cpu().numpy()
                 self.metrics[task].update(gt, pred) 
     
     def reset(self):

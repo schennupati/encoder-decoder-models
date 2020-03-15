@@ -108,7 +108,7 @@ def convert_targets_panoptic(targets, permute=(0, 2, 3, 1)):
         pan_segs[i, :, :, :] = pan_seg
         segInfos[i] = segInfo
 
-    converted_targets = {'panoptic_image': pan_segs,
+    converted_targets = {'panoptic': pan_segs,
                          'segment_info': segInfos}
 
     return converted_targets
@@ -151,7 +151,7 @@ def convert_targets(in_targets, cfg, device=None):
                 dict_targets[task] = dict_targets[task].to(device)
             converted_targets.update(dict_targets)
             panoptic_targets = convert_targets_panoptic(targets)
-            panoptic_targets['panoptic_image'] = panoptic_targets['panoptic_image'].to(device)
+            panoptic_targets['panoptic'] = panoptic_targets['panoptic'].to(device)
             converted_targets.update(panoptic_targets)
     return converted_targets
 
@@ -163,13 +163,14 @@ def convert_outputs(outputs, cfg):
     return converted_outputs
 
 
-def post_process_outputs(outputs, cfg, targets):
+def post_process_outputs(outputs, cfg, targets, device):
     converted_outputs = {}
     for task in outputs.keys():
         if cfg[task]['postproc'] == 'argmax':
             converted_outputs[task] = torch.argmax(outputs[task], dim=1)
         elif cfg[task]['postproc'] == 'panoptic':
-            converted_outputs['panoptic'] = generatePanopticFromContour(outputs)
+            panoptic_outputs = generatePanopticFromContour(outputs)
+            converted_outputs.update(panoptic_outputs)
             converted_outputs[task] = torch.argmax(outputs[task], dim=1)
         else:
             converted_outputs[task] = outputs[task]
@@ -181,6 +182,8 @@ def generatePanopticFromContour(outputs):
     else:
         n = 1
     #import pdb; pdb.set_trace()
+    pan_segs = torch.zeros((n, h, w, 3))
+    segInfos = {i:[] for i in range(n)}
     for i in range(n):
         contours = torch.argmax(outputs['instance_contour'][i,:,:].detach().cpu(),dim=0).numpy()
         img = decode_segmap(contours,nc=11,labels=inst_labels)
@@ -188,7 +191,11 @@ def generatePanopticFromContour(outputs):
         contours[contours>0] = 1        
         mask = seg >=11
         _, panoptic_image = getPanopticFromContour(mask, seg, contours)
-        return panoptic_image
+        pan_seg, segInfo = getPanoptic(panoptic_image)
+        pan_segs[i, :, :, :] = pan_seg
+        segInfos[i] = segInfo
+    
+    return {'panoptic': pan_segs, 'segment_info': segInfos}
 
 def getPanopticFromContour(mask, seg, contours):
     diff = seg*(1-contours)*mask
@@ -200,7 +207,7 @@ def getPanopticFromContour(mask, seg, contours):
 
 def getPanoptic(inst, useTrainId=True):
     panoptic_seg = np.zeros((inst.shape + (3, )), dtype=np.uint8)
-    inst = inst.numpy()
+    inst = inst.numpy() if torch.is_tensor(inst) else inst
     segmentIds = np.unique(inst)
     segmInfo = []
     for segmentId in segmentIds:
