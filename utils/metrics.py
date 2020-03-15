@@ -9,7 +9,7 @@ Created on Wed Jul 24 08:41:09 2019
 
 import numpy as np
 import torch
-from im_utils import panid2label
+from utils.im_utils import panid2label
 
 class runningScore(object):
     def __init__(self, n_classes):

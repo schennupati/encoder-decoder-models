@@ -19,7 +19,7 @@ import tensorflow as tf
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
 from utils.data_utils import (convert_targets, convert_outputs, 
-                              post_process_outputs)
+                              post_process_outputs, getPanopticFromContour)
 from utils.metrics import metrics
 from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss
 from utils.im_utils import cat_labels, prob_labels, inst_labels, decode_segmap
@@ -200,7 +200,7 @@ def validation_step(model,dataloaders,cfg,device,weights,running_val_loss,
         for i,data in tqdm(enumerate(dataloaders['val'])):
             inputs,targets = data 
             outputs = model(inputs.to(device))
-            targets     = convert_targets(targets,cfg['tasks'],device)
+            targets = convert_targets(targets,cfg['tasks'],device)
             #pdb.set_trace()
             val_losses, val_loss = criterion(outputs,targets)
             val_loss_meters.update(val_losses)
@@ -315,28 +315,29 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         img = decode_segmap(predictions[task][0,:,:].detach().cpu(),nc=11,labels=inst_labels)
         contours = img[:,:,0]
         contours[contours>0] = 1
-
-        mask = predictions['instance_probs'][0,:,:].detach().cpu().numpy()
-        seg_img = decode_segmap(predictions['semantic'][0,:,:].cpu())
-        instance_img = get_inst_img_from_contours(mask, seg_img, contours)
-        panoptic_img = get_pan_img(mask, seg_img, instance_img)
+        seg = predictions['semantic'][0,:,:].cpu().numpy()
+        mask = seg>=11
+        instance_img, panoptic_img = getPanopticFromContour(mask, seg, contours)
     
         target = decode_segmap(targets[task][0,:,:].cpu(),nc=11,labels=inst_labels)
         gt_contours = target[:,:,0]
         gt_contours[gt_contours>0] = 1
-        gt_mask = targets['instance_probs'][0,:,:].cpu().numpy()
-        gt_seg_img = decode_segmap(targets['semantic'][0,:,:].cpu())
-        gt_instance_img = get_inst_img_from_contours(gt_mask, gt_seg_img, gt_contours)
-        gt_panoptic_img = get_pan_img(gt_mask, gt_seg_img, gt_instance_img)
+        gt_mask = targets['semantic'][0,:,:].cpu().numpy()>=11
+        gt_seg_img = targets['semantic'][0,:,:].cpu().numpy()
+        gt_instance_img, gt_panoptic_img  = getPanopticFromContour(gt_mask, gt_seg_img, gt_contours)
 
         writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/instance_seg_contour'.format(state,task), gt_instance_img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/panoptic_seg_contour'.format(state,task), gt_panoptic_img,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/gt/instance_seg_contour'.format(state,task),
+                         to_rgb(gt_instance_img), epoch,dataformats='HWC')
+        writer.add_image('Images/{}/gt/panoptic_seg_contour'.format(state,task),
+                         to_rgb(gt_panoptic_img), epoch,dataformats='HWC')
         writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det/instance_seg_contour'.format(state,task), instance_img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det/panoptic_seg_contour'.format(state,task), panoptic_img,epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/instance_seg_contour'.format(state,task),
+                         to_rgb(instance_img), epoch,dataformats='HWC')
+        writer.add_image('Images/{}/det/panoptic_seg_contour'.format(state,task),
+                         to_rgb(panoptic_img), epoch,dataformats='HWC')
     
-        
+       
     elif task == 'instance_regression':
         if train:
             vecs = outputs[task][0,:,:,:].detach().cpu().numpy()

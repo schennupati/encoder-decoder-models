@@ -169,7 +169,7 @@ def post_process_outputs(outputs, cfg, targets):
         if cfg[task]['postproc'] == 'argmax':
             converted_outputs[task] = torch.argmax(outputs[task], dim=1)
         elif cfg[task]['postproc'] == 'panoptic':
-            generatePanopticFromContour(outputs)
+            converted_outputs['panoptic'] = generatePanopticFromContour(outputs)
             converted_outputs[task] = torch.argmax(outputs[task], dim=1)
         else:
             converted_outputs[task] = outputs[task]
@@ -187,18 +187,16 @@ def generatePanopticFromContour(outputs):
         seg = torch.argmax(outputs['semantic'][i,:,:].cpu(), dim=0).numpy()
         contours[contours>0] = 1        
         mask = seg >=11
-        instance_img = getInstanceFromContour(mask, seg, contours)
-        #print(np.unique(instance_img))
-        #plt.imshow(to_rgb(instance_img))
-        #plt.show()
+        _, panoptic_image = getPanopticFromContour(mask, seg, contours)
+        return panoptic_image
 
-def getInstanceFromContour(mask, seg, contours):
+def getPanopticFromContour(mask, seg, contours):
     diff = seg*(1-contours)*mask
     _, labels = cv2.connectedComponents(diff.astype(np.uint8))
     inst = copy.deepcopy(seg)
     inst = inst*1000*(1-contours)*mask
     seg  = seg*(1-mask)   
-    return labels + inst + seg
+    return inst, labels + inst + seg
 
 def getPanoptic(inst, useTrainId=True):
     panoptic_seg = np.zeros((inst.shape + (3, )), dtype=np.uint8)

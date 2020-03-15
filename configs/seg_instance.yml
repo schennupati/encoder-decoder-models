@@ -20,7 +20,7 @@ model:
             metric: classification_metrics
             postproc: panoptic
         instance_regression: 
-            active: True
+            active: False
             out_channels: 2
             loss: l1
             loss_weight: 1.0
@@ -34,7 +34,7 @@ model:
             metric: None
             postproc: None
         instance_probs:
-            active: True
+            active: False
             out_channels: 2
             loss: cross_entropy2d
             loss_weight: 20.0
