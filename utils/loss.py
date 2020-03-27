@@ -86,9 +86,9 @@ def weighted_multiclass_cross_entropy(input, target, weight=None, weights=None):
     input_soft = torch.sigmoid(input)
     target_onehot = F.one_hot(target,num_classes=c).permute(0,3,1,2)
     lc = cross_entropy2d(input, target.long(), weight=weight)
-    #ln = nmsloss.__call__(input, target)
-    ld = dice_loss(input_soft, target_onehot)
-    l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
+    ln = nmsloss.__call__(target_onehot, input)
+    #ld = dice_loss(input_soft, target_onehot)
+    #l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
 
     return lc + ld + l2
 
