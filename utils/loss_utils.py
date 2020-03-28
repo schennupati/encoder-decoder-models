@@ -12,12 +12,13 @@ import pdb
 from utils.loss import (cross_entropy2d,bootstrapped_cross_entropy2d,
                         multi_scale_cross_entropy2d,huber_loss,mae_loss,
                         mse_loss,instance_loss, weighted_binary_cross_entropy,
-                        weighted_multiclass_cross_entropy)
+                        weighted_multiclass_cross_entropy, weighted_multiclass_cross_entropy_with_nms)
 
 loss_map = {
             'cross_entropy2d' : (cross_entropy2d),
             'weighted_binary_cross_entropy' : (weighted_binary_cross_entropy),
             'weighted_multiclass_cross_entropy': (weighted_multiclass_cross_entropy),
+            'weighted_multiclass_cross_entropy_with_nms': (weighted_multiclass_cross_entropy_with_nms),
             'multi_scale_cross_entropy2d' : (multi_scale_cross_entropy2d),
             'bootstrapped_cross_entropy2d': (bootstrapped_cross_entropy2d),
             'huber_loss': (huber_loss),

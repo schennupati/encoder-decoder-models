@@ -86,11 +86,27 @@ def weighted_multiclass_cross_entropy(input, target, weight=None, weights=None):
     input_soft = torch.sigmoid(input)
     target_onehot = F.one_hot(target,num_classes=c).permute(0,3,1,2)
     lc = cross_entropy2d(input, target.long(), weight=weight)
+    ld = dice_loss(input_soft, target_onehot)
+    l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
+
+    return lc + ld + l2
+
+def weighted_multiclass_cross_entropy_with_nms(input, target, weight=None, weights=None):
+    nmsloss = StealNMSLoss()
+    if len(input.size()) == 4:
+        n, c, h, w = input.size()
+    else:
+        c, h, w = input.size()
+    if weight is None:
+        weight = [1 for i in range(c)]
+    input_soft = torch.sigmoid(input)
+    target_onehot = F.one_hot(target,num_classes=c).permute(0,3,1,2)
+    lc = cross_entropy2d(input, target.long(), weight=weight)
     ln = nmsloss.__call__(target_onehot, input_soft)
     #ld = dice_loss(input_soft, target_onehot)
-    #l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
+    l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
 
-    return lc + ln
+    return lc + l2 + 1e-7*ln
 
 def weighted_binary_cross_entropy(input, target, weights=None):
     #input, target = flatten_data(input, target)

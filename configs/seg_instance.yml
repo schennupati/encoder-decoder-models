@@ -112,7 +112,7 @@ data:
 params:
     savelogs: True
     train_batchsize: &train_batchsize 12
-    val_batchsize: &val_batchsize 10
+    val_batchsize: &val_batchsize 6
     n_workers: &n_workers 8
     multigpu: True
     gpu_id: 0
