@@ -53,7 +53,6 @@ def train(cfg):
             train_step(model,data,optimizer,cfg,device,weights,
                        running_loss,train_loss_meters, criterion,
                        print_interval,n_steps,epoch,step,writer)
-            break
         val_metrics, current_loss = validation_step(model,dataloaders,cfg,device,
                                                     weights,running_val_loss,
                                                     val_loss_meters,criterion, 
