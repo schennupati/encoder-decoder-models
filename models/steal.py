@@ -7,11 +7,12 @@ from kornia import filters
 
 
 class StealNMSLoss(nn.Module):
-    def __init__(self, r=2):
+    def __init__(self, r=2, tau=0.1):
         super(StealNMSLoss, self).__init__()
         self.grad2d = filters.SpatialGradient()
         self.nms_loss = 0
         self.r = r
+        self.tau = tau
         self.eps = 1e-7
         self.vert_k = torch.zeros((2*r-1, 2*r-1)).unsqueeze_(0)
         self.vert_k[:, :, r-1] = 1
@@ -35,19 +36,38 @@ class StealNMSLoss(nn.Module):
         grad_xx = second_grad_x[:, :, 0, :, :].squeeze_()
 
 
-        theta = torch.fmod(torch.atan((grad_yy * torch.sign(-grad_xy + self.eps)) / (grad_xx + self.eps)), np.pi)
-        return theta
+        theta = torch.atan((grad_yy * torch.sign(-grad_xy + self.eps)) / (grad_xx + self.eps))
+        angle = theta * 180 / np.pi
+        angle[angle < 0] += 180
+        
+        return angle
 
     def __call__(self, true_labels, pred_labels):
         """
         NMS loss calculation.
-        """
+        """        
         # Find edge directions
-        theta = self.get_grads(true_labels.float())
-        thresh_theta = torch.fmod((theta * (5.0 / np.pi)).round() + 5, 5)
+        grad_angles = self.get_grads(true_labels.float())
+        # thresh_theta = torch.fmod((theta * (5.0 / np.pi)).round() + 5, 5)
+        # print(torch.unique(thresh_theta, return_counts=True))
+        true_edge_mask = (true_labels > 0).float()
+        thresh_horiz = torch.mul(true_edge_mask, 
+                                 (((grad_angles >= 0) & (grad_angles < 22.5)) | ((grad_angles >= 157.5) & (grad_angles < 180))).float())
         
+        thresh_cnt_diag = torch.mul(true_edge_mask, 
+                                    (((grad_angles >= 22.5) & (grad_angles < 67.5))).float())
+        thresh_vert = torch.mul(true_edge_mask, 
+                                (((grad_angles >= 67.5) & (grad_angles < 112.5))).float())
+        thresh_lead_diag = torch.mul(true_edge_mask, 
+                                     (((grad_angles > 112.5) & (grad_angles < 157.5))).float())
         # Create all possible direction NMS
-        exp_preds = torch.exp(pred_labels.float())
+        # print(true_labels.size())
+        # print(torch.max(true_labels))
+        # print(pred_labels.size())
+        # print(torch.max(pred_labels))
+
+        exp_preds = torch.exp(pred_labels.float() * self.tau)
+        # print(torch.max(exp_preds))
         horiz_filter = filters.filter2D(exp_preds, self.horiz_k)
         vert_filter = filters.filter2D(exp_preds, self.vert_k)
         lead_diag_filter = filters.filter2D(exp_preds, self.lead_diag_k)
@@ -59,23 +79,25 @@ class StealNMSLoss(nn.Module):
         # print(cnt_diag_filter.sum())
 
         # Generate masked NMS
-        horiz_nms = torch.clamp(torch.mul((thresh_theta == 0).float(), 
+        horiz_nms = torch.clamp(torch.mul(thresh_horiz, 
                                           torch.div(exp_preds, horiz_filter+self.eps)).unsqueeze_(1),
-                                0, 1)
+                                self.eps, 1)
         # print(horiz_nms.sum())
-        vert_nms = torch.clamp(torch.mul((thresh_theta == 2).float(),
+        vert_nms = torch.clamp(torch.mul(thresh_vert,
                                          torch.div(exp_preds, vert_filter+self.eps)).unsqueeze_(1),
-                               0, 1)
+                               self.eps, 1)
 
-        lead_diag_nms = torch.clamp(torch.mul((thresh_theta == 3).float(),
+        lead_diag_nms = torch.clamp(torch.mul(thresh_lead_diag,
                                               torch.div(exp_preds, lead_diag_filter+self.eps)).unsqueeze_(1),
-                                    0, 1)
-        cnt_diag_nms = torch.clamp(torch.mul((thresh_theta == 1).float(),
+                                    self.eps, 1)
+        cnt_diag_nms = torch.clamp(torch.mul(thresh_cnt_diag,
                                              torch.div(exp_preds, cnt_diag_filter+self.eps)).unsqueeze_(1),
-                                    0, 1)
+                                    self.eps, 1)
 
-        all_nms = torch.cat((horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1)
-        nms_loss = torch.sum(all_nms)
+        all_nms = torch.clamp(torch.cat((horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1), self.eps, 1)
+        # print(torch.max(all_nms))
+        # print(torch.min(all_nms))
+        nms_loss = -torch.sum(torch.log(all_nms))
         # print(nms_loss)
 
         return nms_loss
