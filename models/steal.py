@@ -65,6 +65,11 @@ class StealNMSLoss(nn.Module):
         # print(torch.max(true_labels))
         # print(pred_labels.size())
         # print(torch.max(pred_labels))
+        # print(thresh_horiz.sum())
+        # print(thresh_cnt_diag.sum())
+        # print(thresh_vert.sum())
+        # print(thresh_lead_diag.sum())
+
 
         exp_preds = torch.exp(pred_labels.float() * self.tau)
         # print(torch.max(exp_preds))
@@ -79,25 +84,36 @@ class StealNMSLoss(nn.Module):
         # print(cnt_diag_filter.sum())
 
         # Generate masked NMS
-        horiz_nms = torch.clamp(torch.mul(thresh_horiz, 
-                                          torch.div(exp_preds, horiz_filter+self.eps)).unsqueeze_(1),
-                                self.eps, 1)
+        horiz_nms = torch.mul(thresh_horiz, 
+                              torch.log(torch.clamp(torch.div(exp_preds, 
+                                                              horiz_filter+self.eps),
+                                                    self.eps, 1))).unsqueeze_(1)
         # print(horiz_nms.sum())
-        vert_nms = torch.clamp(torch.mul(thresh_vert,
-                                         torch.div(exp_preds, vert_filter+self.eps)).unsqueeze_(1),
-                               self.eps, 1)
+        vert_nms = torch.mul(thresh_vert,
+                             torch.log(torch.clamp(torch.div(exp_preds,
+                                                             vert_filter+self.eps),
+                                       self.eps, 1))).unsqueeze_(1)
 
-        lead_diag_nms = torch.clamp(torch.mul(thresh_lead_diag,
-                                              torch.div(exp_preds, lead_diag_filter+self.eps)).unsqueeze_(1),
-                                    self.eps, 1)
-        cnt_diag_nms = torch.clamp(torch.mul(thresh_cnt_diag,
-                                             torch.div(exp_preds, cnt_diag_filter+self.eps)).unsqueeze_(1),
-                                    self.eps, 1)
-
-        all_nms = torch.clamp(torch.cat((horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1), self.eps, 1)
+        lead_diag_nms = torch.mul(thresh_lead_diag,
+                                  torch.log(torch.clamp(torch.div(exp_preds,
+                                                                  lead_diag_filter+self.eps),
+                                                        self.eps, 1))).unsqueeze_(1)
+        cnt_diag_nms = torch.mul(thresh_cnt_diag,
+                                 torch.log(torch.clamp(torch.div(exp_preds,
+                                                                 cnt_diag_filter+self.eps),
+                                                       self.eps, 1))).unsqueeze_(1)
+        
+        # print(horiz_nms.min())
+        # print(vert_nms.sum())
+        # print(lead_diag_nms.sum())
+        # print(cnt_diag_nms.sum())
+        
+        
+        all_nms = torch.cat((horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1)
+        # print(all_nms.size())
         # print(torch.max(all_nms))
         # print(torch.min(all_nms))
-        nms_loss = -torch.sum(torch.log(all_nms))
+        nms_loss = -torch.mean(torch.sum(all_nms, (1, 2, 3, 4)))
         # print(nms_loss)
 
         return nms_loss

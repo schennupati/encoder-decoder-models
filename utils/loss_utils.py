@@ -101,6 +101,9 @@ class MultiTaskLoss(nn.Module):
         elif loss_fn == 'weighted_multiclass_cross_entropy':
             weights = self.get_weights(target)
             loss = weighted_multiclass_cross_entropy(prediction, target.long(), weight=weight,weights=weights)
+        elif loss_fn == 'weighted_multiclass_cross_entropy_with_nms':
+            weights = self.get_weights(target)
+            loss = weighted_multiclass_cross_entropy_with_nms(prediction, target.long(), weight=weight,weights=weights)
         elif loss_fn ==  'l1':
             non_zeros = torch.nonzero(target).size(0)
             if prediction.size() !=target.size():

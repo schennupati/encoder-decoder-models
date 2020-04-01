@@ -76,7 +76,6 @@ def dice_loss(input_soft: torch.Tensor, target: torch.Tensor, eps: float = 1e-8)
 
 
 def weighted_multiclass_cross_entropy(input, target, weight=None, weights=None):
-    nmsloss = StealNMSLoss()
     if len(input.size()) == 4:
         n, c, h, w = input.size()
     else:
