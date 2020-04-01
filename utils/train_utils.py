@@ -327,14 +327,14 @@ def add_images_to_writer(inputs,outputs,predictions,targets,writer,task,epoch,tr
         gt_instance_img, gt_panoptic_img  = getPanopticFromContour(gt_mask, gt_seg_img, gt_contours)
 
         writer.add_image('Images/{}/gt/{}'.format(state,task), target,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/instance_seg_contour'.format(state,task),
+        writer.add_image('Images/{}/gt/instance_seg'.format(state,task),
                          to_rgb(gt_instance_img), epoch,dataformats='HWC')
-        writer.add_image('Images/{}/gt/panoptic_seg_contour'.format(state,task),
+        writer.add_image('Images/{}/gt/panoptic_seg'.format(state,task),
                          to_rgb(gt_panoptic_img), epoch,dataformats='HWC')
         writer.add_image('Images/{}/det/{}'.format(state,task), img,epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det/instance_seg_contour'.format(state,task),
+        writer.add_image('Images/{}/det/instance_seg'.format(state,task),
                          to_rgb(instance_img), epoch,dataformats='HWC')
-        writer.add_image('Images/{}/det/panoptic_seg_contour'.format(state,task),
+        writer.add_image('Images/{}/det/panoptic_seg'.format(state,task),
                          to_rgb(panoptic_img), epoch,dataformats='HWC')
     
        

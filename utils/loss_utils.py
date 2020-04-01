@@ -141,7 +141,8 @@ class MultiTaskLoss(nn.Module):
             for i, task in enumerate(self.losses.keys()):
                 if self.cfg[task]['loss'] == 'cross_entropy2d' or \
                    self.cfg[task]['loss'] == 'weighted_binary_cross_entropy' or \
-                   self.cfg[task]['loss'] == 'weighted_multiclass_cross_entropy':
+                   self.cfg[task]['loss'] == 'weighted_multiclass_cross_entropy' or \
+                   self.cfg[task]['loss'] == 'weighted_multiclass_cross_entropy_with_nms':
                     loss += torch.exp(-self.sigma[i])*self.losses[task] + 0.5*self.sigma[i]
                 elif self.cfg[task]['loss'] == 'l1' or self.cfg[task]['loss'] == 'l2':
                     loss += 0.5*(torch.exp(-self.sigma[i])*self.losses[task] + self.sigma[i])

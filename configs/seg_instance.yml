@@ -1,6 +1,6 @@
 model:
     arch: encoder_decoder # Shared encoder and independent decoders
-    encoder: resnet50 # resnet 18 and resnet34 are not supported with fpn
+    encoder: efficientnet_b1 # resnet 18 and resnet34 are not supported with fpn
     decoder: fpn
     pretrained_path: /home/sumche/results
     loss_fn: uncertainty # fixed, uncertainty etc
@@ -15,7 +15,7 @@ model:
         instance_contour:
             active: True
             out_channels: 11
-            loss: weighted_multiclass_cross_entropy_with_nms
+            loss: weighted_multiclass_cross_entropy #_with_nms
             loss_weight: 4.0
             metric: classification_metrics # TODO: panoptic_metrics
             postproc: panoptic
@@ -111,11 +111,11 @@ data:
                     
 params:
     savelogs: True
-    train_batchsize: &train_batchsize 12
-    val_batchsize: &val_batchsize 6
+    train_batchsize: &train_batchsize 16
+    val_batchsize: &val_batchsize 10
     n_workers: &n_workers 8
     multigpu: True
-    gpu_id: 0
+    gpu_id: 1
     print_interval: 50
     resume: True
     early_stop: True

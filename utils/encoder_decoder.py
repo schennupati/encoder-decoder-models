@@ -56,8 +56,12 @@ outplanes_map = {
                        'fpn':[128,64], 'fcn':[320,112,40,40,32]
                        }
                 }                    
-                      
-    
+
+filter_dims = { 'resnet50': [64, 256, 512, 2048],
+                'efficientnet_b0':[24, 40, 112, 320],
+                'efficientnet_b1':[24, 40, 112, 320]
+               }                      
+
 decoder_map = {'fcn': (FCN),'fpn':(FPN)}
 
 def get_encoder_decoder(cfg, pretrained_backbone=True):
@@ -95,14 +99,9 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
         if encoder_name == 'efficientnet_b0':
             encoder = efficientnet_b0(pretrained=True).features
             return_layers = {'3': 'out_1','5': 'out_2','11': 'out_3','16': 'out_final'}
-            #for name,_ in encoder.named_children():
-                #return_layers[name]=name
         elif encoder_name == 'efficientnet_b1':
             encoder = efficientnet_b1(pretrained=True).features
-            #return_layers = {}
             return_layers = {'5': 'out_1','8': 'out_2','16': 'out_3','23': 'out_final'}
-            #for name,_ in encoder.named_children():
-                #return_layers[name]=name
         encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
         inplanes = inplanes_map['efficientnet'][encoder_name]
         outplanes = outplanes_map['efficientnet'][decoder_name]
@@ -110,26 +109,12 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
             decoder_fn = decoder_map['fpn']
         elif decoder_name =='fcn':
             decoder_fn = decoder_map['fcn']
-        
-        
-    ''' 
-    decoders = nn.ModuleList()
-    for task in tasks.keys():
-        if tasks[task]['active']:
-            task_cfg = tasks[task]
-            decoder = decoder_fn(in_planes=inplanes, out_planes= outplanes,
-                                 n_class=task_cfg["out_channels"],
-                                 activation=task_cfg["activation"],
-                                 activate_last=task_cfg["activate_last"])
-            decoders.extend([decoder])
-    '''
+
     model = Encoder_Decoder(encoder, decoder_fn, cfg, 
                             in_planes=inplanes, out_planes= outplanes)
-    #pdb.set_trace()
     return model
 
 def get_task_cls(in_channels, out_channels, kenrel_size = (1,1)):
-    #pdb.set_trace()
     return nn.Sequential(nn.Conv2d(in_channels,out_channels,kenrel_size))
             
 def get_intermediate_result(model, output):
@@ -160,13 +145,20 @@ class _Encoder_Decoder(nn.Module):
                                          self.heads['semantic']['out_channels'])
         if self.heads['instance_contour']['active']:
             num_classes = self.heads['instance_contour']['out_channels']
-            self.score_edge_side1 = SideOutputCrop(64)
-            self.score_edge_side2 = SideOutputCrop(256, kernel_sz=4, stride=2, upconv_pad=1, do_crops=False)
-            self.score_edge_side3 = SideOutputCrop(512, kernel_sz=8, stride=4, upconv_pad=2, do_crops=False)
-            self.score_cls_side5 = Res5OutputCrop(kernel_sz=16, stride=16, nclasses=num_classes, upconv_pad=0,
-                                                 do_crops=False)
-            self.ce_fusion = nn.Conv2d(4*num_classes, num_classes, groups=num_classes, kernel_size=1, stride=1, padding=0,
-                                   bias=True)
+            self.score_edge_side1 = SideOutputCrop(filter_dims[self.model['encoder']][0])
+            self.score_edge_side2 = SideOutputCrop(filter_dims[self.model['encoder']][1], kernel_sz=4, 
+                                                   stride=2, upconv_pad=1, do_crops=False)
+            self.score_edge_side3 = SideOutputCrop(filter_dims[self.model['encoder']][2], kernel_sz=8,
+                                                   stride=4, upconv_pad=2, do_crops=False)
+            if 'resnet' in self.model['encoder']: 
+                kernel_sz, stride = 16, 16
+            elif 'efficientnet' in self.model['encoder']:
+                kernel_sz, stride = 8, 8
+            self.score_cls_side5 = Res5OutputCrop(in_channels= filter_dims[self.model['encoder']][-1], 
+                                                  kernel_sz=kernel_sz, stride=stride, nclasses=num_classes,
+                                                  upconv_pad=0, do_crops=False)
+            self.ce_fusion = nn.Conv2d(4*num_classes, num_classes, groups=num_classes,
+                                       kernel_size=1, stride=1, padding=0, bias=True)
         if self.heads['instance_regression']['active']:
             self.instance_regression = get_task_cls(out_planes[-1],
                                                     self.heads['instance_regression']['out_channels'])
@@ -176,7 +168,7 @@ class _Encoder_Decoder(nn.Module):
         if self.heads['instance_probs']['active']:
             self.instance_probs = get_task_cls(out_planes[-1],
                                                self.heads['instance_probs']['out_channels'])
-        
+
     def forward(self, x):
         outputs = {}
         input_data = x
@@ -194,17 +186,11 @@ class _Encoder_Decoder(nn.Module):
             side1 = self.score_edge_side1(intermediate_result[layers[0]], input_data)
             side2 = self.score_edge_side2(intermediate_result[layers[1]], input_data)
             side3 = self.score_edge_side3(intermediate_result[layers[2]], input_data)
-            side5 = self.score_cls_side5(intermediate_result[layers[4]], input_data)
-            # for key in intermediate_result.keys():
-            #     print(key, intermediate_result[key].size())
-            # print('##########')    
-            # print(side1.size())
-            # print(side2.size())
-            # print(side3.size())
-            # print(side5.size())
+            side5 = self.score_cls_side5(intermediate_result[layers[-1]], input_data)
             out = self._sliced_concat(side1, side2, side3, side5, num_classes)
             out = self.ce_fusion(out)
-            out = F.interpolate(out, scale_factor= 2, mode='bilinear', align_corners=True)
+            scale_factor = 2 if 'resnet' in self.model['encoder'] else 4
+            out = F.interpolate(out, scale_factor= scale_factor, mode='bilinear', align_corners=True)
             #out = F.softmax(out, dim=1)
             #out = torch.sigmoid(out)
             outputs['instance_contour'] = out
@@ -217,13 +203,12 @@ class _Encoder_Decoder(nn.Module):
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_heatmap'] = out
         if self.heads['instance_probs']['active']:
-
             out = self.instance_probs(class_score)
             out = F.relu(out, inplace=True)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_probs'] = out 
 
-        return outputs   # size=(N, n_class, x.H/1, x.W/1)
+        return outputs # Size = (N, n_class, x.H/1, x.W/1)
     
     def _sliced_concat(self, res1, res2, res3, res5, num_classes):
         out_dim = num_classes * 4
@@ -231,12 +216,10 @@ class _Encoder_Decoder(nn.Module):
         class_num = 0
         for i in range(0, out_dim, 4):
             out_tensor[:, i, :, :] = res5[:, class_num, :, :]
-            out_tensor[:, i + 1, :, :] = res1[:, 0, :, :]  # it needs this trick for multibatch
+            out_tensor[:, i + 1, :, :] = res1[:, 0, :, :]  # It needs this trick for multibatch
             out_tensor[:, i + 2, :, :] = res2[:, 0, :, :]
             out_tensor[:, i + 3, :, :] = res3[:, 0, :, :]
-
             class_num += 1
-
         return out_tensor
 
     def _normalize(self, out):
