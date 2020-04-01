@@ -14,7 +14,7 @@ model:
             postproc: argmax
         instance_contour:
             active: True
-            out_channels: 11
+            out_channels: 10
             loss: weighted_multiclass_cross_entropy #_with_nms
             loss_weight: 4.0
             metric: classification_metrics # TODO: panoptic_metrics

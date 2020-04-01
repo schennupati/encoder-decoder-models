@@ -36,12 +36,12 @@ def cross_entropy2d(input, target, weight=None, size_average=True):
         input, target, weight=weight, ignore_index=255)
     return loss
 
-def make_one_hot(labels, num_classes=11):
+def make_one_hot(labels, num_classes=10):
     n,h,w = labels.size()
     one_hot = torch.zeros((n, num_classes,h, w), dtype=labels.dtype)
     # handle ignore labels
     for class_id in range(num_classes):
-        one_hot[:, class_id,...] = (labels==class_id)
+        one_hot[:, class_id,...] = (labels==class_id+1)
     return one_hot.to(labels.get_device())
 
 def BCELoss_ClassWeights(input, target, class_weights, reversed=False):
@@ -49,11 +49,8 @@ def BCELoss_ClassWeights(input, target, class_weights, reversed=False):
     # target (n, d)
     # class_weights (1, d)
     input = torch.clamp(input,min=1e-7,max=1-1e-7)
-    if reversed:
-        bce = target * torch.log(input) + (1 - target) * torch.log(1 - input)
-    else:
-        bce = class_weights[0]*target * torch.log(input) + class_weights[1]*(1 - target) * torch.log(1 - input)
-    final_reduced_over_batch = -bce.mean()
+    bce = class_weights[0]*target * torch.log(input) + class_weights[1]*(1 - target) * torch.log(1 - input)
+    final_reduced_over_batch = -bce.sum()
     return final_reduced_over_batch
 
 def dice_loss(input_soft: torch.Tensor, target: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -125,7 +122,6 @@ def weighted_binary_cross_entropy(input, target, weights):
     
     for i in range(c):
         input_, target_ = input[:,i,...].view(n,h*w), target[:,i,...].view(n,h*w)
-        reversed = True if c==0 else False 
         bce_loss += BCELoss_ClassWeights(input_,target_,class_weights=weights,reversed=reversed)   
     return bce_loss
 
