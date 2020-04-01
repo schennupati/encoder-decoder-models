@@ -50,7 +50,7 @@ def BCELoss_ClassWeights(input, target, class_weights, reversed=False):
     # class_weights (1, d)
     input = torch.clamp(input,min=1e-7,max=1-1e-7)
     if reversed:
-        bce = class_weights[1]*target * torch.log(input) + class_weights[0]*(1 - target) * torch.log(1 - input)
+        bce = target * torch.log(input) + (1 - target) * torch.log(1 - input)
     else:
         bce = class_weights[0]*target * torch.log(input) + class_weights[1]*(1 - target) * torch.log(1 - input)
     final_reduced_over_batch = -bce.mean()
