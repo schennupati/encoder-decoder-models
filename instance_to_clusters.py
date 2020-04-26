@@ -10,7 +10,7 @@ import os
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-from utils.im_utils import cat_labels,prob_labels, decode_segmap
+from utils.im_utils import cat_labels, prob_labels, inst_labels, decode_segmap
 from sklearn.cluster import DBSCAN
 import torch
 import torch.nn.functional as F
@@ -138,7 +138,7 @@ def compute_centroid_vectors(instance_image):
     return vecs, mask, heatmap_t
 
 def compute_centroid_vector_torch(instance_image):
-    alpha = 5.0
+    alpha = 10.0
     instance_image_tensor = torch.Tensor(instance_image.astype(np.int16))
     centroids_t = torch.zeros(instance_image.shape + (2,))
     w_h = torch.ones(instance_image.shape + (2,))
@@ -147,7 +147,6 @@ def compute_centroid_vector_torch(instance_image):
         xs, ys = xsys[:, 0], xsys[:, 1]
         centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()), torch.mean(ys.float())))
         if value > 1000:
-            #pdb.set_trace()
             w, h = get_instance_hw(xs, ys)
             if w!=0 and h!=0:
                 w_h[xs, ys,0], w_h[xs, ys,1]  = w.float(), h.float()
@@ -179,21 +178,24 @@ def compute_centroid_vector_torch(instance_image):
     return vecs.permute(2,0,1).numpy(), mask.numpy(), heatmap_t.numpy()
 
 def compute_instance_contours(instance_image):
+    contour_class_map = {i+24: i for i in range(10)}
     contours = np.zeros(instance_image.shape)
     for value in np.unique(instance_image):
         xs, ys = np.where(instance_image == value)
         if value>1000:
+            contour_class = contour_class_map[value//1000]
             cont = np.array([xs, ys])
             for x in np.unique(cont[0,:]):
                 idx = np.where(cont[0,:]==x)
-                contours[x, np.min(cont[1,idx])] = 1
-                contours[x, np.max(cont[1,idx])] = 1
+                contours[x, np.min(cont[1,idx])] = contour_class+1
+                contours[x, np.max(cont[1,idx])] = contour_class+1
             for y in np.unique(cont[1,:]):
                 idx = np.where(cont[1,:]==y)
-                contours[np.min(cont[0,idx]), y] = 1
-                contours[np.max(cont[0,idx]), y] = 1
-    kernel = np.ones((9,9), np.uint8)  
-    contours = cv2.dilate(contours, kernel, iterations=1)
+                contours[np.min(cont[0,idx]), y] = contour_class+1
+                contours[np.max(cont[0,idx]), y] = contour_class+1
+    contours = decode_segmap(contours, nc=10, labels=inst_labels)
+    #kernel = np.ones((9,9), np.uint8)  
+    #contours = cv2.dilate(contours, kernel, iterations=1)
     return contours
 
 def get_color(num):
@@ -278,6 +280,9 @@ def get_clusters(inst_seg, mask, heatmap):
     inst_img = np.zeros_like(mask)
     h,w = mask.shape
     centroids = get_centroids(inst_seg, mask)
+    heatmap = heatmap/np.max(heatmap)
+    heatmap[heatmap>0.1] = 1
+    heatmap[heatmap<0.1] = 0
     heatmap = (heatmap*255.0).astype(np.uint8)
     _, labels = cv2.connectedComponents(heatmap)
     for i in range(h):
@@ -336,31 +341,39 @@ def plot_images(identifier):
     #save_plot(seg_img, identifier +'_seg_image.png')
 
     inst_img = cv2.imread(os.path.join(root,annot,split,city,identifier+instance_tag),-1)
-    contours = compute_instance_contours(inst_img)
+    #contours = compute_instance_contours(inst_img)
+    #plt.imshow(contours)
+    #plt.show()
     #save_plot(contours, identifier +'_contours_image.png')
     
     vecs, mask, heatmap = compute_centroid_vector_torch(inst_img)
     #save_plot(get_color_inst(vecs), identifier +'_instance_offsets.png')
-    save_plot(heatmap, identifier +'_instance_centroid.png')
+    #save_plot(heatmap, identifier +'_instance_centroid.png')
     #save_plot(mask, identifier +'_instance_mask_image.png')
     
-    inst_img = get_clusters(vecs, mask, heatmap)
-    plt.imshow(inst_img)
+    instance_img = get_clusters(vecs, mask, heatmap)
+    plt.imshow(instance_img)
     plt.show()
-    diff = np.zeros_like(seg_img)
-    for i in range(3):
-        diff[:,:,i] = seg_img[:,:,i]*(1-contours)*mask[0]
+    #contours = contours[:,:,0]
+    #contours[contours>0] = 1
+    #diff = np.zeros_like(seg_img)
+    #plt.imshow(mask)
+    #plt.show()
+    #for i in range(3):
+    #    diff[:,:,i] = seg_img[:,:,i]*(1-contours)*mask
 
-    save_plot(diff, identifier +'_diff_image.png')
+    #save_plot(diff, identifier +'_diff_image.png')
     
-    ret, labels = cv2.connectedComponents(diff[:,:,2])
-    instance_img = imshow_components(labels)
+    #ret, labels = cv2.connectedComponents(diff[:,:,2])
+    #instance_img = imshow_components(labels)
     #save_plot(instance_img, identifier +'_instance_seg.png')
 
     for i in range(3):
-        seg_img[:,:,i] = seg_img[:,:,i]*(1-mask[0])
+        seg_img[:,:,i] = seg_img[:,:,i]*(1-mask)
 
     pan_img = seg_img + instance_img
+    plt.imshow(pan_img)
+    plt.show()
     #save_plot(pan_img, identifier +'_panoptic_seg.png')
 #plot_images(identifier)
     

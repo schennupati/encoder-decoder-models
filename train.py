@@ -8,7 +8,7 @@ Created on Fri Jul 19 07:59:23 2019
 import argparse
 from tqdm import tqdm
 
-from utils.data_utils import get_weights, get_cfg
+from utils.data_utils import get_weights, get_cfg, get_class_weights_from_data
 from utils.loss_utils import averageMeter
 from utils.dataloader import get_dataloaders
 from utils.train_utils import get_device, get_config_params, get_model, \
@@ -18,7 +18,7 @@ from utils.train_utils import get_device, get_config_params, get_model, \
                               stop_training, save_model, \
                               get_writer, get_criterion
 
-def train(cfg):
+def main(cfg, mode):
     # Define Configuration parameters
     device = get_device(cfg)
     weights = get_weights(cfg,device)
@@ -41,36 +41,55 @@ def train(cfg):
         model,optimizer,criterion, start_iter,best_loss = load_checkpoint(model,optimizer,
                                                                criterion, exp_dir)
     else:
-        print("Begining Training from Scratch")
-                    
-    for epoch in range(epochs):
-        print('\n********************** Epoch {} **********************'.format(epoch+1))
-        print('********************** Training *********************')        
-        running_loss = averageMeter()
+        if mode == 'train':
+            print("Begining Training from Scratch")
+    if mode == 'train':                    
+        for epoch in range(epochs):
+            print('\n********************** Epoch {} **********************'.format(epoch+1))
+            print('********************** Training *********************')        
+            running_loss = averageMeter()
+            running_val_loss = averageMeter()
+            n_steps = len(dataloaders['train'])        
+            for step, data in tqdm(enumerate(dataloaders['train'])):
+                train_step(model,data,optimizer,cfg,device,weights,
+                        running_loss,train_loss_meters, criterion,
+                        print_interval,n_steps,epoch,step,writer)
+                #break
+            val_metrics, current_loss = validation_step(model,dataloaders,cfg,device,
+                                                        weights,running_val_loss,
+                                                        val_loss_meters,criterion, 
+                                                        val_metrics, epoch,writer)
+            print_metrics(val_metrics)
+            val_metrics.reset()
+            state,best_loss,plateau_count = save_model(model,optimizer,criterion,cfg,current_loss,
+                                                    best_loss,plateau_count,
+                                                    start_iter,epoch,state)             
+            if stop_training(patience,plateau_count,early_stop,epoch,state):
+                break
+        writer.close()
+    elif mode == 'val':
         running_val_loss = averageMeter()
-        n_steps = len(dataloaders['train'])        
-        for step, data in tqdm(enumerate(dataloaders['train'])):
-            train_step(model,data,optimizer,cfg,device,weights,
-                       running_loss,train_loss_meters, criterion,
-                       print_interval,n_steps,epoch,step,writer)
-            #break
-        val_metrics, current_loss = validation_step(model,dataloaders,cfg,device,
-                                                    weights,running_val_loss,
-                                                    val_loss_meters,criterion, 
-                                                    val_metrics, epoch,writer)
+        epoch = 1
+        val_metrics, _ = validation_step(model,dataloaders,cfg,device,
+                                            weights,running_val_loss,
+                                            val_loss_meters,criterion, 
+                                            val_metrics, epoch,writer, mode)
         print_metrics(val_metrics)
-        state,best_loss,plateau_count = save_model(model,optimizer,criterion,cfg,current_loss,
-                                                   best_loss,plateau_count,
-                                                   start_iter,epoch,state)             
-        if stop_training(patience,plateau_count,early_stop,epoch,state):
-            break
-    writer.close()
+        val_metrics.reset()
+        writer.close()
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="config")
     parser.add_argument("--config", nargs="?", 
                         type=str, default="configs/seg_instance.yml", 
                         help="Configuration to use")
+    parser.add_argument("--mode", nargs="?", choices=['train', 'val'],
+                        type=str, default='train', 
+                        help="train/val mode")
     args = parser.parse_args()    
     cfg = get_cfg(args.config)
-    train(cfg)
+    mode = args.mode
+    main(cfg, mode)
