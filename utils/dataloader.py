@@ -31,9 +31,8 @@ def get_dataloaders(cfg):
     
     for target in cfg['tasks'].keys():
         target_type.append(target)
-    
-    if len(target_type) == 1:
-        target_type = target_type[0]
+
+    target_type = target_type[0] if len(target_type) == 1 else target_type
         
     for split in ['train','val']:
         params = cfg['params'][split]
@@ -43,7 +42,3 @@ def get_dataloaders(cfg):
                                                           shuffle=params['shuffle'],
                                                           num_workers=params['n_workers'])
     return data_loaders
-    
-     
-     
-     

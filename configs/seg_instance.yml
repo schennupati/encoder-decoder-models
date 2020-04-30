@@ -37,7 +37,7 @@ model:
             active: True
             out_channels: 2
             loss: cross_entropy2d
-            loss_weight: 1.0
+            loss_weight: 20.0
             metric: classification_metrics
             postproc: argmax
 
@@ -48,19 +48,28 @@ tasks: # for dataloaders
     instance:
         active: True
         type: float
-        
+
+postprocs:
+    instance:
+        active: True
+    panoptic:
+        active: True
+
 data:
     dataset: Cityscapes
     root_path: /home/sumche/datasets/Cityscapes
-    im_size: &im_size 512
+    im_size: &im_size 256
     random_scaling: &random_scaling !!python/tuple [0.5, 1.0]
-    val_im_size: &val_im_size 1024
+    val_im_size: &val_im_size 512
     transforms:
         train:
             input:
                 RandomScale: 
                     flag: False
-                    scale: *random_scaling        
+                    scale: *random_scaling
+                Resize:
+                    flag: True
+                    size: *val_im_size        
                 RandomCrop: 
                     flag: True
                     size: *im_size
@@ -70,9 +79,6 @@ data:
                     contrast: 0.25
                     saturation: 0.25 
                     hue: 0.25
-                Resize:
-                    flag: False
-                    size: *im_size
                 ToTensor:
                     flag: True
                 Normalize:
@@ -82,12 +88,12 @@ data:
             target:
                 RandomScale: 
                     flag: False
-                    scale: *random_scaling        
+                    scale: *random_scaling
+                Resize:
+                    flag: True
+                    size: *val_im_size        
                 RandomCrop: 
                     flag: True
-                    size: *im_size
-                Resize:
-                    flag: False
                     size: *im_size
                 ToTensor:
                     flag: True
@@ -111,8 +117,7 @@ data:
                     
 params:
     savelogs: True
-    train_batchsize: &train_batchsize 16
-    val_batchsize: &val_batchsize 10
+    batchsize: &batch_size 12
     n_workers: &n_workers 8
     multigpu: True
     gpu_id: 1

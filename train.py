@@ -78,9 +78,6 @@ def main(cfg, mode):
         val_metrics.reset()
         writer.close()
 
-
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="config")
     parser.add_argument("--config", nargs="?", 

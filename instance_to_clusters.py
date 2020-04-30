@@ -193,9 +193,10 @@ def compute_instance_contours(instance_image):
                 idx = np.where(cont[1,:]==y)
                 contours[np.min(cont[0,idx]), y] = contour_class+1
                 contours[np.max(cont[0,idx]), y] = contour_class+1
-    contours = decode_segmap(contours, nc=10, labels=inst_labels)
-    #kernel = np.ones((9,9), np.uint8)  
-    #contours = cv2.dilate(contours, kernel, iterations=1)
+    contours = decode_segmap(contours, nc=11, labels=inst_labels)
+    kernel = np.ones((9,9), np.uint8)  
+    contours = cv2.morphologyEx(contours, cv2.MORPH_CLOSE, kernel)
+
     return contours
 
 def get_color(num):
@@ -270,10 +271,11 @@ def to_rgb(bw_im):
               np.zeros(bw_im.shape, dtype=int), 
               np.zeros(bw_im.shape, dtype=int)]
     for instance in instances:
-        color = get_color(instance)
-        rgb_im[0][instance == bw_im] = color[0]
-        rgb_im[1][instance == bw_im] = color[1]
-        rgb_im[2][instance == bw_im] = color[2]
+        if instance !=0:
+            color = get_color(instance)
+            rgb_im[0][instance == bw_im] = color[0]
+            rgb_im[1][instance == bw_im] = color[1]
+            rgb_im[2][instance == bw_im] = color[2]
     return np.stack([rgb_im[0],rgb_im[1],rgb_im[2]],axis=-1)
 
 def get_clusters(inst_seg, mask, heatmap):
@@ -303,15 +305,32 @@ def get_centroids(inst_seg, mask):
     return centroids.astype(np.int16)
 
 root = '/home/sumche/datasets/Cityscapes'
-identifier = 'lindau_000037_000019'
+identifier = 'frankfurt_000000_000294'
 img = 'leftImg8bit'
 annot = 'gtFine'
 split = 'val'
-city = 'lindau'
+city = 'frankfurt'
 
 img_tag = '_leftImg8bit.png'
 seg_tag = '_gtFine_color.png'
 instance_tag = '_gtFine_instanceIds.png'
+
+def compute_instance_contours_open_cv(instance_image):
+    contour_class_map = {i+24: i+1 for i in range(10)}
+    contour_class_map[0] = 0
+    contours = np.zeros(instance_image.shape)
+    for value in np.unique(instance_image):
+        cont_mask = np.zeros_like(instance_image)        
+        if value>1000:
+            cont_mask[np.where(instance_image == value)] = 255
+            cont_img = np.zeros(instance_image.shape)
+            _,thresh = cv2.threshold(cont_mask,127,255,0)
+            cnts, _ = cv2.findContours(thresh.astype(np.uint8),cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
+            contour_class = contour_class_map[value//1000]
+            contours[np.where(cont_img==1.0)] = contour_class
+    contours = decode_segmap(contours, nc=11, labels=inst_labels)
+    return contours
 
 def imshow_components(labels):
     # Map component labels to hue val
@@ -341,9 +360,9 @@ def plot_images(identifier):
     #save_plot(seg_img, identifier +'_seg_image.png')
 
     inst_img = cv2.imread(os.path.join(root,annot,split,city,identifier+instance_tag),-1)
-    #contours = compute_instance_contours(inst_img)
-    #plt.imshow(contours)
-    #plt.show()
+    contours = compute_instance_contours(inst_img)
+    contours = compute_instance_contours_open_cv(inst_img)
+
     #save_plot(contours, identifier +'_contours_image.png')
     
     vecs, mask, heatmap = compute_centroid_vector_torch(inst_img)
@@ -351,21 +370,21 @@ def plot_images(identifier):
     #save_plot(heatmap, identifier +'_instance_centroid.png')
     #save_plot(mask, identifier +'_instance_mask_image.png')
     
-    instance_img = get_clusters(vecs, mask, heatmap)
-    plt.imshow(instance_img)
-    plt.show()
-    #contours = contours[:,:,0]
-    #contours[contours>0] = 1
-    #diff = np.zeros_like(seg_img)
+    #instance_img = get_clusters(vecs, mask, heatmap)
+    #plt.imshow(instance_img)
+    #plt.show()
+    contours = contours[:,:,0]
+    contours[contours>0] = 1
+    diff = np.zeros_like(seg_img)
     #plt.imshow(mask)
     #plt.show()
-    #for i in range(3):
-    #    diff[:,:,i] = seg_img[:,:,i]*(1-contours)*mask
+    for i in range(3):
+        diff[:,:,i] = seg_img[:,:,i]*(1-contours)*mask
 
     #save_plot(diff, identifier +'_diff_image.png')
     
-    #ret, labels = cv2.connectedComponents(diff[:,:,2])
-    #instance_img = imshow_components(labels)
+    ret, labels = cv2.connectedComponents(diff[:,:,2])
+    instance_img = to_rgb(labels)
     #save_plot(instance_img, identifier +'_instance_seg.png')
 
     for i in range(3):

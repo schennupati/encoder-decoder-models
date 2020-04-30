@@ -22,7 +22,6 @@ class _FPNModel(nn.Module):
         #                                  upsample=True,kernel_size=1,factor=4)
 
     def forward(self, intermediate_result, layers):
-        
         #for layer in layers:
         #    print(intermediate_result[layer].size())
     
