@@ -26,8 +26,8 @@ __all__ = ['FCN']
 inplanes_map = {
                 'resnet':
                          {
-                          'resnet18':[512,256,128],'resnet34':[512,256,128],
-                          'resnet50':[2048,1024,512],'resnet101':[2048,1024,512],
+                          'resnet18':[512,256,128,64],'resnet34':[512,256,128,64],
+                          'resnet50':[2048,1024,512,256],'resnet101':[2048,1024,512,256],
                           'resnet152':[2048,1024,512],'resnext50_32x4d':[2048,1024,512],
                           'resnext101_32x8d':[2048,1024,512],'wide_resnet50_2':[2048,1024,512],
                           'wide_resnet101_2':[2048,1024,512]
@@ -69,18 +69,16 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     if 'resnet' in encoder_name:
         if encoder_name in ['resnet18','resnet34'] and decoder_name=='fpn':
             raise ValueError('{} is not supported with fpn'.format(encoder_name))
+        return_layers = {'relu': 'out_0','layer1': 'out_1','layer2': 'out_2','layer3': 'out_3','layer4': 'out_final'}
+        encoder = resnet.__dict__[encoder_name](pretrained=pretrained_backbone,
+                                 replace_stride_with_dilation=[False, False, False])       
+        encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
+        inplanes = inplanes_map['resnet'][encoder_name]
         if decoder_name == 'fpn':
-            encoder    = resnet_fpn_backbone(encoder_name,pretrained=True)
-            inplanes   = [256,256,256,256]
             outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fpn']
             
         elif decoder_name == 'fcn':
-            return_layers = {'layer2': 'out_1','layer3': 'out_2','layer4': 'out_final'}
-            encoder = resnet.__dict__[encoder_name](pretrained=pretrained_backbone,
-                                 replace_stride_with_dilation=[False, False, False])       
-            encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
-            inplanes = inplanes_map['resnet'][encoder_name]
             outplanes = outplanes_map['resnet'][decoder_name]
             decoder_fn = decoder_map['fcn']
             
@@ -97,14 +95,9 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
         if encoder_name == 'efficientnet_b0':
             encoder = efficientnet_b0(pretrained=True).features
             return_layers = {'3': 'out_1','5': 'out_2','11': 'out_3','16': 'out_final'}
-            #for name,_ in encoder.named_children():
-                #return_layers[name]=name
         elif encoder_name == 'efficientnet_b1':
             encoder = efficientnet_b1(pretrained=True).features
-            #return_layers = {}
             return_layers = {'5': 'out_1','8': 'out_2','16': 'out_3','23': 'out_final'}
-            #for name,_ in encoder.named_children():
-                #return_layers[name]=name
         encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
         inplanes = inplanes_map['efficientnet'][encoder_name]
         outplanes = outplanes_map['efficientnet'][decoder_name]
@@ -112,26 +105,12 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
             decoder_fn = decoder_map['fpn']
         elif decoder_name =='fcn':
             decoder_fn = decoder_map['fcn']
-        
-        
-    ''' 
-    decoders = nn.ModuleList()
-    for task in tasks.keys():
-        if tasks[task]['active']:
-            task_cfg = tasks[task]
-            decoder = decoder_fn(in_planes=inplanes, out_planes= outplanes,
-                                 n_class=task_cfg["out_channels"],
-                                 activation=task_cfg["activation"],
-                                 activate_last=task_cfg["activate_last"])
-            decoders.extend([decoder])
-    '''
+
     model = Encoder_Decoder(encoder, decoder_fn, cfg, 
                             in_planes=inplanes, out_planes= outplanes)
-    #pdb.set_trace()
     return model
 
 def get_task_cls(in_channels, out_channels, kenrel_size = (1,1)):
-    #pdb.set_trace()
     return nn.Sequential(nn.Conv2d(in_channels,out_channels,kenrel_size))
             
 def get_intermediate_result(model, output):
@@ -140,8 +119,6 @@ def get_intermediate_result(model, output):
     intermediate_result = OrderedDict()
     layers = [k for k,_ in output.items()]
     if 'resnet' in encoder and 'fpn' in decoder:
-        layers = layers[:-1]
-    elif 'efficientnet' in encoder and 'fcn' in decoder:
         layers = layers[1:]
     else: 
         layers = layers
@@ -175,7 +152,7 @@ class _Encoder_Decoder(nn.Module):
         if self.heads['instance_probs']['active']:
             self.instance_probs = get_task_cls(out_planes[-1],
                                                self.heads['instance_probs']['out_channels'])
-        
+
     def forward(self, x):
         outputs = {}
         x = self.encoder(x)
@@ -203,13 +180,12 @@ class _Encoder_Decoder(nn.Module):
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_heatmap'] = out
         if self.heads['instance_probs']['active']:
-
             out = self.instance_probs(class_score)
             out = F.relu(out, inplace=True)
             out = F.interpolate(out, scale_factor= 4, mode='bilinear', align_corners=True)
             outputs['instance_probs'] = out 
 
-        return outputs   # size=(N, n_class, x.H/1, x.W/1)
+        return outputs # Size = (N, n_class, x.H/1, x.W/1)
     
     def _sliced_concat(self, res1, res2, res3, res5, num_classes):
         out_dim = num_classes * 4
@@ -217,12 +193,10 @@ class _Encoder_Decoder(nn.Module):
         class_num = 0
         for i in range(0, out_dim, 4):
             out_tensor[:, i, :, :] = res5[:, class_num, :, :]
-            out_tensor[:, i + 1, :, :] = res1[:, 0, :, :]  # it needs this trick for multibatch
+            out_tensor[:, i + 1, :, :] = res1[:, 0, :, :]  # It needs this trick for multibatch
             out_tensor[:, i + 2, :, :] = res2[:, 0, :, :]
             out_tensor[:, i + 3, :, :] = res3[:, 0, :, :]
-
             class_num += 1
-
         return out_tensor
 
     def _normalize(self, out):

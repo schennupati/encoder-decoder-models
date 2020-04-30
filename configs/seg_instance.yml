@@ -17,7 +17,7 @@ model:
             out_channels: 11
             loss: cross_entropy2d
             loss_weight: 1.0
-            metric: classification_metrics
+            metric: classification_metrics # TODO: panoptic_metrics
             postproc: argmax
         instance_regression: 
             active: False
@@ -111,10 +111,11 @@ data:
                     
 params:
     savelogs: True
-    batchsize: &batch_size 2
+    train_batchsize: &train_batchsize 16
+    val_batchsize: &val_batchsize 10
     n_workers: &n_workers 8
     multigpu: True
-    gpu_id: 0
+    gpu_id: 1
     print_interval: 50
     resume: True
     early_stop: True
