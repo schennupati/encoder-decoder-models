@@ -8,47 +8,54 @@ Created on Tue Jul 30 13:40:49 2019
 import torch
 import torch.nn as nn
 import pdb
-#TODO:Implement MTL loss combinations
-from utils.loss import (cross_entropy2d,bootstrapped_cross_entropy2d,
-                        multi_scale_cross_entropy2d,huber_loss,mae_loss,
-                        mse_loss,instance_loss, weighted_binary_cross_entropy)
+# TODO:Implement MTL loss combinations
+from utils.loss import (cross_entropy2d, bootstrapped_cross_entropy2d,
+                        multi_scale_cross_entropy2d, huber_loss, mae_loss,
+                        mse_loss, instance_loss, weighted_binary_cross_entropy)
+from utils.data_utils import get_weights
+from utils.train_utils import get_device
 
 loss_map = {
-            'cross_entropy2d' : (cross_entropy2d),
-            'weighted_binary_cross_entropy' : (weighted_binary_cross_entropy),
-            'multi_scale_cross_entropy2d' : (multi_scale_cross_entropy2d),
-            'bootstrapped_cross_entropy2d': (bootstrapped_cross_entropy2d),
-            'huber_loss': (huber_loss),
-            'mae_loss' : (mae_loss),
-            'mse_loss' : (mse_loss),
-            'instance_loss': (instance_loss)
-            }
+    'cross_entropy2d': (cross_entropy2d),
+    'weighted_binary_cross_entropy': (weighted_binary_cross_entropy),
+    'multi_scale_cross_entropy2d': (multi_scale_cross_entropy2d),
+    'bootstrapped_cross_entropy2d': (bootstrapped_cross_entropy2d),
+    'huber_loss': (huber_loss),
+    'mae_loss': (mae_loss),
+    'mse_loss': (mse_loss),
+    'instance_loss': (instance_loss)
+}
+
+
 def get_loss_fn(loss_type):
     return loss_map[loss_type] if loss_type in loss_map.keys() else None
-    
-def compute_task_loss(inputs,targets,weights,loss_type):
-    loss_fn = get_loss_fn(loss_type)
-    return loss_fn(inputs,targets,weights)
 
-def compute_loss(predictions,targets,cfg,weights=None):
+
+def compute_task_loss(inputs, targets, weights, loss_type):
+    loss_fn = get_loss_fn(loss_type)
+    return loss_fn(inputs, targets, weights)
+
+
+def compute_loss(predictions, targets, cfg, weights=None):
     out_loss = 0.0
     losses = {}
-    
+
     for task in cfg.keys():
         prediction = predictions[task]
-        target     = targets[task]
+        target = targets[task]
         weight = weights[task] if weights is not None else None
         loss_weight = cfg[task]['loss_weight']
-        loss_type  = cfg[task]['loss']
-        loss = compute_task_loss(prediction,target,weight,loss_type)
-        
+        loss_type = cfg[task]['loss']
+        loss = compute_task_loss(prediction, target, weight, loss_type)
+
         losses[task] = loss
         out_loss += loss_weight*loss
-        
-    return losses,out_loss
+
+    return losses, out_loss
+
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self, cfg, weights=None, loss_type='fixed'):
+    def __init__(self, cfg, weights, loss_type='fixed'):
         super(MultiTaskLoss, self).__init__()
         self.losses = {}
         self.cfg = cfg
@@ -60,18 +67,17 @@ class MultiTaskLoss(nn.Module):
         self.loss_type = loss_type
         self.l1 = nn.L1Loss(reduction='sum')
         self.l2 = nn.MSELoss(reduction='sum')
-    
+
     def get_active_tasks(self):
         active_tasks = []
         for task in self.tasks:
             if self.cfg[task]['active']:
                 active_tasks.append(task)
         return active_tasks
-    
+
     def get_sigma(self, active_tasks):
         n = len(active_tasks)
         return nn.Parameter(torch.ones(n))
-
 
     def forward(self, predictions, targets):
         active_tasks = self.get_active_tasks()
@@ -80,45 +86,46 @@ class MultiTaskLoss(nn.Module):
             prediction = predictions[task]
             target = targets[task]
             weight = self.weights[task]
-            loss_fn  = self.cfg[task]['loss']
-            self.losses[task] = self.compute_task_loss(prediction, 
-                                                      target, weight, loss_fn)
+            loss_fn = self.cfg[task]['loss']
+            self.losses[task] = self.compute_task_loss(prediction,
+                                                       target, weight, loss_fn)
 
         device = self.losses[task].get_device()
         self.sigma.to(device)
-        total_loss =  self.compute_total_loss()
+        total_loss = self.compute_total_loss()
         return self.losses, total_loss
-    
+
     def compute_task_loss(self, prediction, target, weight, loss_fn):
         if loss_fn == 'cross_entropy2d':
             loss = cross_entropy2d(prediction, target.long(), weight=weight)
         elif loss_fn == 'weighted_binary_cross_entropy':
             weights = self.get_weights(target)
-            loss = weighted_binary_cross_entropy(prediction, target.long(), weights=weights)
-        elif loss_fn ==  'l1':
+            loss = weighted_binary_cross_entropy(
+                prediction, target.long(), weights=weights)
+        elif loss_fn == 'l1':
             non_zeros = torch.nonzero(target).size(0)
-            if prediction.size() !=target.size():
-                prediction = prediction.permute(0,2,3,1).squeeze()
+            if prediction.size() != target.size():
+                prediction = prediction.permute(0, 2, 3, 1).squeeze()
             loss = self.l1(prediction, target)
-            loss = loss/non_zeros if non_zeros >0 else torch.zeros_like(loss)
-        elif loss_fn ==  'l2':
+            loss = loss/non_zeros if non_zeros > 0 else torch.zeros_like(loss)
+        elif loss_fn == 'l2':
             non_zeros = torch.nonzero(target).size(0)
-            if prediction.size() !=target.size():
-                prediction = prediction.permute(0,2,3,1).squeeze()
+            if prediction.size() != target.size():
+                prediction = prediction.permute(0, 2, 3, 1).squeeze()
             loss = self.l2(prediction, target)
-            loss = loss/non_zeros if non_zeros >0 else torch.zeros_like(loss)
-        return loss        
-    
+            loss = loss/non_zeros if non_zeros > 0 else torch.zeros_like(loss)
+        return loss
+
     def get_weights(self, target):
         non_zeros = torch.nonzero(target).size(0)
-        if len(target.size())==2:
+        if len(target.size()) == 2:
             ht, wt = target.size()
             nt = 1
-        elif len(target.size())==3:
+        elif len(target.size()) == 3:
             nt, ht, wt = target.size()
-        num_pixs  = nt*ht*wt
-        beta = 1- non_zeros/num_pixs
-        weights = torch.tensor([beta, 1- beta])
+        num_pixs = nt*ht*wt
+        beta = 1 - non_zeros/num_pixs
+        weights = torch.tensor([beta, 1 - beta])
         device = target.get_device()
         return weights.to(device)
 
@@ -131,10 +138,14 @@ class MultiTaskLoss(nn.Module):
         elif self.loss_type == 'uncertainty':
             for i, task in enumerate(self.losses.keys()):
                 if self.cfg[task]['loss'] == 'cross_entropy2d' or self.cfg[task]['loss'] == 'weighted_binary_cross_entropy':
-                    loss += torch.exp(-self.sigma[i])*self.losses[task] + 0.5*self.sigma[i]
+                    loss += torch.exp(-self.sigma[i]) * \
+                        self.losses[task] + 0.5*self.sigma[i]
                 elif self.cfg[task]['loss'] == 'l1' or self.cfg[task]['loss'] == 'l2':
-                    loss += 0.5*(torch.exp(-self.sigma[i])*self.losses[task] + self.sigma[i])
+                    loss += 0.5 * \
+                        (torch.exp(-self.sigma[i]) *
+                         self.losses[task] + self.sigma[i])
         return loss
+
 
 class averageMeter(object):
     """Computes and stores the average and current value"""
@@ -154,25 +165,25 @@ class averageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+
 class loss_meters:
-    def __init__(self,cfg):
-        self.cfg = cfg    
+    def __init__(self, cfg):
+        self.cfg = cfg
         self.meters = self.get_loss_meters()
-        
+
     def get_loss_meters(self):
         meters = {}
         for task in self.cfg.keys():
             if self.cfg[task]['active']:
                 meters[task] = averageMeter()
         return meters
-    
-    def update(self,losses):
+
+    def update(self, losses):
         for task in self.cfg.keys():
-             if self.cfg[task]['active']:
+            if self.cfg[task]['active']:
                 self.meters[task].update(losses[task])
-    
+
     def reset(self):
         for task in self.cfg.keys():
-             if self.cfg[task]['active']:
+            if self.cfg[task]['active']:
                 self.meters[task].reset()
-    

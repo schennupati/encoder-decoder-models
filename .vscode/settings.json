@@ -1,0 +1,24 @@
+{
+  "python.pythonPath": "/usr/local/bin/python",
+  "python.linting.pylintEnabled": true,
+  "python.linting.mypyEnabled": true,
+  "python.linting.enabled": true,
+  "python.linting.pydocstyleEnabled": true,
+  "editor.rulers": [80, 80],
+  "python.linting.pycodestyleEnabled": true,
+  "html.format.unformatted": "",
+  "python.formatting.provider": "autopep8",
+"html.format.wrapLineLength": 80,
+"editor.wordWrap": "wordWrapColumn",
+"cSpell.words": [
+    "PROBS",
+    "cuda",
+    "gpus",
+    "imshow",
+    "imsize",
+    "nargs",
+    "segmap",
+    "strftime",
+    "tqdm"
+]
+}

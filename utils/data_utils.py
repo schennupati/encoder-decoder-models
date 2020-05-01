@@ -11,10 +11,11 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 from utils.im_utils import labels, prob_labels, \
-                           id2label, decode_segmap, inst_labels
+    id2label, decode_segmap, inst_labels
 from instance_to_clusters import get_clusters, imshow_components, to_rgb
 import matplotlib.pyplot as plt
 import cv2
+
 
 def convert_targets_semantic(targets, permute=(0, 2, 3, 1), labels=labels):
     targets = torch.squeeze((targets*255).permute(permute)).numpy()
@@ -82,6 +83,7 @@ def convert_targets_instance(targets, permute=(0, 2, 3, 1)):
                          'instance_contour': contours}
     return converted_targets
 
+
 def convert_targets_instance_contours(targets, permute=(0, 2, 3, 1)):
     n, h, w, targets = prepare_targets(targets, permute)
     contours = torch.zeros((n, h, w))
@@ -97,7 +99,7 @@ def convert_targets_instance_contours(targets, permute=(0, 2, 3, 1)):
 def convert_targets_panoptic(targets, permute=(0, 2, 3, 1)):
     n, h, w, targets = prepare_targets(targets, permute)
     pan_segs = torch.zeros((n, h, w, 3))
-    segInfos = {i:[] for i in range(n)}
+    segInfos = {i: [] for i in range(n)}
     for i in range(n):
         pan_seg, segInfo = getPanoptic(targets[i, :, :])
         pan_segs[i, :, :, :] = pan_seg
@@ -128,6 +130,7 @@ def convert_data_type(data, data_type):
     elif data_type == 'float':
         return data.float()
 
+
 def convert_targets(in_targets, cfg, device=None):
     # cfg['tasks']
     converted_targets = {}
@@ -146,7 +149,8 @@ def convert_targets(in_targets, cfg, device=None):
                 dict_targets[task] = dict_targets[task].to(device)
             converted_targets.update(dict_targets)
             panoptic_targets = convert_targets_panoptic(targets)
-            panoptic_targets['panoptic_image'] = panoptic_targets['panoptic_image'].to(device)
+            panoptic_targets['panoptic_image'] = panoptic_targets['panoptic_image'].to(
+                device)
             converted_targets.update(panoptic_targets)
     return converted_targets
 
@@ -170,29 +174,34 @@ def post_process_outputs(outputs, cfg, targets):
             converted_outputs[task] = outputs[task]
     return converted_outputs
 
+
 def generatePanopticFromContour(outputs):
     for i in range(n):
-        contours = torch.argmax(outputs['instance_contour'][i,:,:].detach().cpu(),dim=0).numpy()
-        img = decode_segmap(contours,nc=11,labels=inst_labels)
-        seg = torch.argmax(outputs['semantic'][i,:,:].cpu(), dim=0).numpy()
-        contours[contours>0] = 1        
-        mask = seg >=11
+        contours = torch.argmax(
+            outputs['instance_contour'][i, :, :].detach().cpu(), dim=0).numpy()
+        img = decode_segmap(contours, nc=11, labels=inst_labels)
+        seg = torch.argmax(outputs['semantic'][i, :, :].cpu(), dim=0).numpy()
+        contours[contours > 0] = 1
+        mask = seg >= 11
         instance_img = getInstanceFromContour(mask, seg, contours)
 
+
 def getInstanceFromContour(mask, seg, contours):
-    contours = torch.argmax(outputs['instance_contour'][i,:,:].detach().cpu(),dim=0).numpy()
-    img = decode_segmap(contours,nc=11,labels=inst_labels)
-    seg = torch.argmax(outputs['semantic'][i,:,:].cpu(), dim=0).numpy()
-    contours[contours>0] = 1        
-    mask = seg >=11
+    contours = torch.argmax(
+        outputs['instance_contour'][i, :, :].detach().cpu(), dim=0).numpy()
+    img = decode_segmap(contours, nc=11, labels=inst_labels)
+    seg = torch.argmax(outputs['semantic'][i, :, :].cpu(), dim=0).numpy()
+    contours[contours > 0] = 1
+    mask = seg >= 11
     instance_img = getInstanceFromContour(mask, seg, contours)
 
     diff = seg*(1-contours)*mask
     _, labels = cv2.connectedComponents(diff.astype(np.uint8))
     inst = copy.deepcopy(seg)
     inst = inst*1000*(1-contours)*mask
-    seg  = seg*(1-mask)   
+    seg = seg*(1-mask)
     return labels + inst + seg
+
 
 def getPanoptic(inst, useTrainId=True):
     panoptic_seg = np.zeros((inst.shape + (3, )), dtype=np.uint8)
@@ -238,6 +247,7 @@ def getPanoptic(inst, useTrainId=True):
 
     return torch.tensor(panoptic_seg), segmInfo
 
+
 def get_class_weights_from_data(loader, num_classes, cfg, task):
     trainId_to_count = {}
     for trainId in range(num_classes):
@@ -270,21 +280,27 @@ def get_class_weights_from_data(loader, num_classes, cfg, task):
 
 def cityscapes_semantic_weights(num_classes):
     if num_classes == 20:
-        class_weights = [2.955507538630981, 13.60952309186396, 5.56145316824849,
-                         37.623098044056555, 35.219757095290035, 30.4509054117227,
-                         46.155918742024745, 40.29336775103404, 7.1993048519013465,
-                         31.964755676368643, 24.369833379633036, 26.667508196892037,
-                         45.45602154799861, 9.738884687765038, 43.93387854348821,
-                         43.46301980622594, 44.61855914531797, 47.50842372150186,
+        class_weights = [2.955507538630981, 13.60952309186396,
+                         5.56145316824849, 37.623098044056555,
+                         35.219757095290035, 30.4509054117227,
+                         46.155918742024745, 40.29336775103404,
+                         7.1993048519013465, 31.964755676368643,
+                         24.369833379633036, 26.667508196892037,
+                         45.45602154799861, 9.738884687765038,
+                         43.93387854348821, 43.46301980622594,
+                         44.61855914531797, 47.50842372150186,
                          40.44117532401872, 12.772291423775606]
 
     elif num_classes == 19:
-        class_weights = [3.045383480249677, 12.862127312658735, 4.509888876996228,
-                         38.15694593009221, 35.25278401818165, 31.48260832348194,
-                         45.79224481584843, 39.69406346608758, 6.0639281852733715,
-                         32.16484408952653, 17.10923371690307, 31.5633201415795,
-                         47.33397232867321, 11.610673599796504, 44.60042610251128,
-                         45.23705196392834, 45.28288297518183, 48.14776939659858,
+        class_weights = [3.045383480249677, 12.862127312658735,
+                         4.509888876996228, 38.15694593009221,
+                         35.25278401818165, 31.48260832348194,
+                         45.79224481584843, 39.69406346608758,
+                         6.0639281852733715, 32.16484408952653,
+                         17.10923371690307, 31.5633201415795,
+                         47.33397232867321, 11.610673599796504,
+                         44.60042610251128, 45.23705196392834,
+                         45.28288297518183, 48.14776939659858,
                          41.924631833506794]
 
     elif num_classes == 34:
@@ -297,10 +313,12 @@ def cityscapes_semantic_weights(num_classes):
 
 def cityscapes_contour_weights(num_classes):
     if num_classes == 11:
-        class_weights = [1.427197976828025, 47.66104006965641, 50.0977099173462,
-                         44.04363870779025, 50.31372660864973, 50.31163764506638,
-                         50.47265462912245, 50.471431327406826, 50.36620380700314,
-                         50.32661428022733, 49.834611789928324]
+        class_weights = [1.427197976828025, 47.66104006965641,
+                         50.0977099173462, 44.04363870779025,
+                         50.31372660864973, 50.31163764506638,
+                         50.47265462912245, 50.471431327406826,
+                         50.36620380700314, 50.32661428022733,
+                         49.834611789928324]
 
     else:
         raise ValueError('Invalid number of classes for Cityscapes dataset')
@@ -353,10 +371,11 @@ def compute_centroid_vector_torch(instance_image):
             contour_class = contour_class_map[int(value.numpy()//1000)]
             cont_mask[np.where(instance_image == value)] = 255
             cont_img = np.zeros(instance_image.shape)
-            _,thresh = cv2.threshold(cont_mask,127,255,0)
-            cnts, _ = cv2.findContours(thresh.astype(np.uint8),cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            _, thresh = cv2.threshold(cont_mask, 127, 255, 0)
+            cnts, _ = cv2.findContours(thresh.astype(
+                np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
-            contours[np.where(cont_img==1.0)] = contour_class
+            contours[np.where(cont_img == 1.0)] = contour_class
             cont = np.array([xs.numpy(), ys.numpy()])
             for x in np.unique(cont[0, :]):
                 idx = np.where(cont[0, :] == x)
