@@ -1,23 +1,35 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jul 30 11:06:24 2019
+"""data utilities to support target conversion, postprocs etc."""
 
-@author: sumche
-"""
 import copy
 import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
-from utils.im_utils import labels, prob_labels, \
-    id2label, decode_segmap, inst_labels
-from instance_to_clusters import get_clusters, imshow_components, to_rgb
 import matplotlib.pyplot as plt
 import cv2
 
+from utils.im_utils import labels, prob_labels, trainId2label, id2label, \
+    decode_segmap, inst_labels
+from utils.constants import TASKS, MODEL, OUTPUTS, TYPE, SEMANTIC, INSTANCE, \
+    DISPARITY, PANOPTIC, ACTIVE, OUTPUTS_TO_TASK, INSTANCE_REGRESSION, \
+    INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS
+from instance_to_clusters import get_clusters, imshow_components, to_rgb
+
 
 def convert_targets_semantic(targets, permute=(0, 2, 3, 1), labels=labels):
+    """Convert semantic segmentation targets.
+
+    Arguments:
+        targets {torch.tensor} -- [torch tensor containing targets]
+
+    Keyword Arguments:
+        permute {tuple} -- [swap axis] (default: {(0, 2, 3, 1)})
+        labels {list} -- [list with named tuples containing semantic
+        class information.] (default: {labels})
+
+    Returns:
+        [torch.tensor] -- [converted semantic segmentation targets]
+    """
     targets = torch.squeeze((targets*255).permute(permute)).numpy()
     new_targets = np.empty_like(targets)
     for label_id in np.unique(targets):
@@ -27,7 +39,18 @@ def convert_targets_semantic(targets, permute=(0, 2, 3, 1), labels=labels):
     return torch.tensor(new_targets)
 
 
-def prepare_targets(targets, permute):
+def prepare_targets(targets, permute=(0, 2, 3, 1)):
+    """Prepare targets for conversion.
+
+    Arguments:
+        targets {torch.tensor} -- [torch tensor containing targets]
+
+    Keyword Arguments:
+        permute {tuple} -- [swap axis] (default: {(0, 2, 3, 1)})
+
+    Returns:
+        [tuple] -- [batch_size, dimensions(h,w), targets]
+    """
     targets = torch.squeeze((targets).permute(permute))
     if len(targets.size()) > 2:
         n, h, w = targets.size()
@@ -39,11 +62,22 @@ def prepare_targets(targets, permute):
 
 
 def convert_targets_disparity(targets, permute=(0, 2, 3, 1)):
+    """Convert depth estimation targets.
+
+    Arguments:
+        targets {torch.tensor} -- [torch tensor containing targets]
+
+    Keyword Arguments:
+        permute {tuple} -- [swap axis] (default: {(0, 2, 3, 1)})
+
+    Returns:
+        [torch.tensor] -- [normalized depth map with values between (0,1)]
+    """
     normalized_dep = []
     n = targets.size()[0] if len(targets.size()) > 2 else 1
     targets = torch.squeeze((targets).permute(permute)).numpy()
     targets[targets > 0] = (targets[targets > 0]-1)/256
-    inv_dep = targets/(0.209313*2262.52)
+    inv_dep = targets/(0.209313*2262.52)  # TODO: parse parameters as args.
 
     if n > 1:
         for i in range(n):
@@ -59,40 +93,68 @@ def convert_targets_disparity(targets, permute=(0, 2, 3, 1)):
     return torch.tensor(normalized_dep).type(torch.float32)
 
 
-def convert_targets_instance(targets, permute=(0, 2, 3, 1)):
+def convert_targets_instance(targets, permute=(0, 2, 3, 1),
+                             contours_active=False,
+                             regression_active=False):
+    """Convert instance regression targets.
+
+    Arguments:
+        targets {torch.tensor} -- [torch tensor containing targets]
+
+    Keyword Arguments:
+        permute {tuple} -- [swap axis] (default: {(0, 2, 3, 1)})
+
+    Returns:
+        [dict] -- [Instance regression targets in with instance_image,
+        centroids_regression, probabilites, heatmap, contours]
+    """
+    # TODO: Please clean this up.
     n, h, w, targets = prepare_targets(targets, permute)
-    imgs = torch.zeros((n, h, w))
-    vecs = torch.zeros((n, 2, h, w))
     masks = torch.zeros((n, h, w))
-    heatmaps = torch.zeros((n, h, w))
-    contours = torch.zeros((n, h, w))
+    if regression_active:
+        imgs = torch.zeros((n, h, w))
+        vecs = torch.zeros((n, 2, h, w))
+        heatmaps = torch.zeros((n, h, w))
+    if contours_active:
+        contours = torch.zeros((n, h, w))
     for i in range(n):
-        img, reg, mask, heatmap, contour = compute_centroid_vector_torch(
-            targets[i, :, :].float())
-        #print((torch.min(reg), torch.max(reg)), (torch.min(heatmap), torch.max(heatmap)))
-        imgs[i, :, :] = img.long()
-        vecs[i, :, :, :] = reg.float()
-        masks[i, :, :] = mask.long()
-        heatmaps[i, :, :] = heatmap.float()
-        contours[i, :, :] = contour.long()
-
-    converted_targets = {'instance_image': imgs,
-                         'instance_regression': vecs,
-                         'instance_probs': masks,
-                         'instance_heatmap': heatmaps,
-                         'instance_contour': contours}
-    return converted_targets
-
-
-def convert_targets_instance_contours(targets, permute=(0, 2, 3, 1)):
-    n, h, w, targets = prepare_targets(targets, permute)
-    contours = torch.zeros((n, h, w))
-    for i in range(n):
-        cont = compute_instance_contours(targets[i, :, :].float())
-        #print((torch.min(reg), torch.max(reg)), (torch.min(heatmap), torch.max(heatmap)))
-        contours[i, :, :] = cont.long()
-
-    converted_targets = {'instance_contour': contours}
+        target = targets[i, :, :].float()
+        if contours_active and regression_active:
+            img, reg, mask, heatmap, contour \
+                = compute_instance_torch(target, True, True)
+            imgs[i, :, :] = img.long()
+            vecs[i, :, :, :] = reg.float()
+            masks[i, :, :] = mask.long()
+            heatmaps[i, :, :] = heatmap.float()
+            contours[i, :, :] = contour.long()
+        elif regression_active:
+            img, reg, mask, heatmap \
+                = compute_instance_torch(target, False, True)
+            imgs[i, :, :] = img.long()
+            vecs[i, :, :, :] = reg.float()
+            masks[i, :, :] = mask.long()
+            heatmaps[i, :, :] = heatmap.float()
+        elif contours_active:
+            img, mask, contour \
+                = compute_instance_torch(target, True, False)
+            imgs[i, :, :] = img.long()
+            masks[i, :, :] = mask.long()
+            contours[i, :, :] = contour.long()
+    if regression_active and contours_active:
+        converted_targets = {'instance_image': imgs,
+                             'instance_regression': vecs,
+                             'instance_probs': masks,
+                             'instance_heatmap': heatmaps,
+                             'instance_contour': contours}
+    elif contours_active:
+        converted_targets = {'instance_image': imgs,
+                             'instance_probs': masks,
+                             'instance_contour': contours}
+    elif regression_active:
+        converted_targets = {'instance_image': imgs,
+                             'instance_regression': vecs,
+                             'instance_probs': masks,
+                             'instance_heatmap': heatmaps}
     return converted_targets
 
 
@@ -101,7 +163,7 @@ def convert_targets_panoptic(targets, permute=(0, 2, 3, 1)):
     pan_segs = torch.zeros((n, h, w, 3))
     segInfos = {i: [] for i in range(n)}
     for i in range(n):
-        pan_seg, segInfo = getPanoptic(targets[i, :, :])
+        pan_seg, segInfo = getPanopticEval(targets[i, :, :])
         pan_segs[i, :, :, :] = pan_seg
         segInfos[i] = segInfo
 
@@ -111,13 +173,13 @@ def convert_targets_panoptic(targets, permute=(0, 2, 3, 1)):
     return converted_targets
 
 
-def get_convert_fn(task):
-    if task == 'semantic':
+def get_labels_fn(task):
+    if task == SEMANTIC:
         return (convert_targets_semantic)
-    elif task == 'disparity':
+    elif task == DISPARITY:
         return (convert_targets_disparity)
-    elif task == 'instance':
-        return (convert_targets_instance)  # Replace accordingly
+    elif task == INSTANCE:
+        return (convert_targets_instance)
     else:
         return None
 
@@ -131,79 +193,120 @@ def convert_data_type(data, data_type):
         return data.float()
 
 
-def convert_targets(in_targets, cfg, device=None):
-    # cfg['tasks']
-    converted_targets = {}
-    for i, task in enumerate(cfg.keys()):
-        data_type = cfg[task]['type']
-        convert_fn = get_convert_fn(task)
+def get_labels(in_targets, cfg, device=None):
+    labels = {}
+    active_outputs = get_active_tasks(cfg[MODEL][OUTPUTS])
+    active_postprocs = get_active_tasks(cfg[POSTPROCS])
+    for i, task in enumerate(cfg[TASKS].keys()):
+        data_type = cfg[TASKS][task][TYPE]
+        label_fn = get_labels_fn(task)
         targets = in_targets[i] if isinstance(in_targets, list) else in_targets
-        if task != 'instance':
-            converted_target = convert_fn(
-                targets) if convert_fn is not None else targets
-            converted_targets[task] = convert_data_type(
-                converted_target, data_type).to(device)
-        else:
-            dict_targets = convert_fn(targets)
+        if task in [SEMANTIC, DISPARITY]:
+            if label_fn is not None:
+                label = label_fn(targets)
+            else:
+                label = targets
+            labels[task] = convert_data_type(label, data_type).to(device)
+        elif task == INSTANCE:
+            contours_active = (
+                True if INSTANCE_CONTOUR in active_outputs else False)
+            regression_active = (
+                True if INSTANCE_REGRESSION in active_outputs else False)
+            dict_targets = label_fn(
+                targets, contours_active, regression_active)
+            panoptic_active = True if PANOPTIC in active_postprocs else False
+            if panoptic_active:
+                dict_targets.update(convert_targets_panoptic(targets))
+
             for task in dict_targets.keys():
                 dict_targets[task] = dict_targets[task].to(device)
-            converted_targets.update(dict_targets)
-            panoptic_targets = convert_targets_panoptic(targets)
-            panoptic_targets['panoptic_image'] = panoptic_targets['panoptic_image'].to(
-                device)
-            converted_targets.update(panoptic_targets)
-    return converted_targets
+
+        labels.update(dict_targets)
+
+    return labels
 
 
-def convert_outputs(outputs, cfg):
-    converted_outputs = {}
-    for i, task in enumerate(cfg.keys()):
-        converted_outputs[task] = outputs[i]
-    return converted_outputs
-
-
-def post_process_outputs(outputs, cfg, targets):
-    converted_outputs = {}
-    for task in outputs.keys():
+def get_predictions(logits, cfg, targets):
+    predictions = {}
+    for task in logits.keys():
         if cfg[task]['postproc'] == 'argmax':
-            converted_outputs[task] = torch.argmax(outputs[task], dim=1)
-        elif cfg[task]['postproc'] == 'panoptic':
-            generatePanopticFromContour(outputs)
-            converted_outputs[task] = torch.argmax(outputs[task], dim=1)
+            predictions[task] = torch.argmax(logits[task], dim=1)
         else:
-            converted_outputs[task] = outputs[task]
-    return converted_outputs
+            predictions[task] = logits[task]
+    return predictions
 
 
-def generatePanopticFromContour(outputs):
-    for i in range(n):
-        contours = torch.argmax(
-            outputs['instance_contour'][i, :, :].detach().cpu(), dim=0).numpy()
-        img = decode_segmap(contours, nc=11, labels=inst_labels)
-        seg = torch.argmax(outputs['semantic'][i, :, :].cpu(), dim=0).numpy()
-        contours[contours > 0] = 1
-        mask = seg >= 11
-        instance_img = getInstanceFromContour(mask, seg, contours)
+def get_labels_fn(task):
+    if task == PANOPTIC:
+        return (convert_targets_semantic)
+    else:
+        return None
+
+
+def post_process_predictions(predictions, post_proc_cfg):
+    outputs = {}
+    for task in post_proc_cfg.keys():
+        if cfg[task][ACTIVE]:
+            inputs_cfg = cfg[task][INPUTS]
+            inputs = get_active_tasks(inputs_cfg)
+            outputs[task] = genrateInstanceFromPredictions(predictions,
+                                                           inputs)
+    return outputs
+
+
+def generatePanopticFromPredictions(predictions, inputs):
+    semantic = generateSemanticFromPredictions(predictions, inputs)
+    instance = genrateInstanceFromPredictions(predictions, inputs)
+    mask = generateMaskFromPredicitons(predictions, inputs)
+    panoptic = semantic*mask + instance
+    panoptic = getPanopticEval(panoptic, useTrainId=True)
+
+    return panoptic
+
+
+def genrateInstanceFromPredictions(predictions, inputs):
+    semantic = generateSemanticFromPredictions(predictions, inputs)
+    mask = generateMaskFromPredicitons(predictions, inputs)
+
+    if INSTANCE_CONTOUR in inputs:
+        contours = predictions[INSTANCE_CONTOUR]
+        instance = getInstanceFromContour(mask, semantic, contours)
+
+    return instance
+
+
+def generateSemanticFromPredictions(predictions, inputs):
+    if SEMANTIC not in inputs:
+        raise ValueError('Expected {} in {}'.format(SEMANTIC, inputs))
+    else:
+        semantic = predictions[SEMANTIC]
+
+    return semantic
+
+
+def generateMaskFromPredicitons(predictions, inputs):
+    semantic = generateSemanticFromPredictions(predictions, inputs)
+    if INSTANCE_PROBS not in inputs:
+        mask = (semantic >= 11).astype(np.uint8)
+    else:
+        mask = predictions[INSTANCE_PROBS]
+
+    return mask
 
 
 def getInstanceFromContour(mask, seg, contours):
-    contours = torch.argmax(
-        outputs['instance_contour'][i, :, :].detach().cpu(), dim=0).numpy()
-    img = decode_segmap(contours, nc=11, labels=inst_labels)
-    seg = torch.argmax(outputs['semantic'][i, :, :].cpu(), dim=0).numpy()
-    contours[contours > 0] = 1
-    mask = seg >= 11
-    instance_img = getInstanceFromContour(mask, seg, contours)
+    inst = np.zeros_like(seg)
+    for i in np.unique(contours):
+        if i != 0:
+            contour = (contours == i).astype(np.uint8)
+            diff = seg*mask*(1-contour)
+            _, labels = cv2.connectedComponents(diff.astype(np.uint8))
+            inst += (i+10)*1000 + labels*(1-contour)
 
-    diff = seg*(1-contours)*mask
-    _, labels = cv2.connectedComponents(diff.astype(np.uint8))
-    inst = copy.deepcopy(seg)
-    inst = inst*1000*(1-contours)*mask
-    seg = seg*(1-mask)
-    return labels + inst + seg
+    return inst
 
 
-def getPanoptic(inst, useTrainId=True):
+def getPanopticEval(inst, useTrainId=False):
     panoptic_seg = np.zeros((inst.shape + (3, )), dtype=np.uint8)
     inst = inst.numpy()
     segmentIds = np.unique(inst)
@@ -215,8 +318,13 @@ def getPanoptic(inst, useTrainId=True):
         else:
             semanticId = segmentId // 1000
             isCrowd = 0
-        labelInfo = id2label[semanticId]
-        categoryId = labelInfo.trainId if useTrainId else labelInfo.id
+
+        if useTrainId:
+            labelInfo = trainId2label[semanticId]
+            categoryId = labelInfo.id
+        else:
+            labelInfo = id2label[semanticId]
+            categoryId = labelInfo.id
         if labelInfo.ignoreInEval:
             continue
         if not labelInfo.hasInstances:
@@ -354,90 +462,108 @@ def get_instance_hw(xs, ys):
     return (abs(vertex_1[0]-vertex_2[0]), abs(vertex_1[1]-vertex_2[1]))
 
 
-def compute_centroid_vector_torch(instance_image):
-    alpha = 10.0
-    contours = np.zeros(instance_image.shape)
-    contour_class_map = {i+24: i+1 for i in range(10)}
+def compute_instance_torch(instance_image, contours_active=False,
+                           regression_active=False):
     instance_image_tensor = torch.Tensor(instance_image)
-    centroids_t = torch.zeros(instance_image.shape + (2,))
-    w_h = torch.ones(instance_image.shape + (2,))
+    mask = instance_image_tensor >= 2400
+    if regression_active:
+        alpha = 10.0
+        centroids_t = torch.zeros(instance_image.shape + (2,))
+        w_h = torch.ones(instance_image.shape + (2,))
+    if contours_active:
+        contours = np.zeros(instance_image.shape)
+        contour_class_map = {i+24: i+1 for i in range(10)}
+
     for value in torch.unique(instance_image_tensor):
-        cont_mask = np.zeros_like(instance_image)
-        xsys = torch.nonzero(instance_image_tensor == value)
-        xs, ys = xsys[:, 0], xsys[:, 1]
-        centroids_t[xs, ys] = torch.stack(
-            (torch.mean(xs.float()), torch.mean(ys.float())))
-        if value > 1000:
-            contour_class = contour_class_map[int(value.numpy()//1000)]
-            cont_mask[np.where(instance_image == value)] = 255
-            cont_img = np.zeros(instance_image.shape)
-            _, thresh = cv2.threshold(cont_mask, 127, 255, 0)
-            cnts, _ = cv2.findContours(thresh.astype(
-                np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
-            contours[np.where(cont_img == 1.0)] = contour_class
-            cont = np.array([xs.numpy(), ys.numpy()])
-            for x in np.unique(cont[0, :]):
-                idx = np.where(cont[0, :] == x)
-                contours[x, np.min(cont[1, idx])] = contour_class
-                contours[x, np.max(cont[1, idx])] = contour_class
-            for y in np.unique(cont[1, :]):
-                idx = np.where(cont[1, :] == y)
-                contours[np.min(cont[0, idx]), y] = contour_class
-                contours[np.max(cont[0, idx]), y] = contour_class
-            w, h = get_instance_hw(xs, ys)
-            if w != 0 and h != 0:
-                w_h[xs, ys, 0], w_h[xs, ys, 1] = w.float(), h.float()
+        if value >= 2400:
+            if regression_active:
+                xsys = torch.nonzero(instance_image_tensor == value)
+                xs, ys = xsys[:, 0], xsys[:, 1]
+                centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()),
+                                                   torch.mean(ys.float())))
+                w, h = get_instance_hw(xs, ys)
+                if w != 0 and h != 0:
+                    w_h[xs, ys, 0], w_h[xs, ys, 1] = w.float(), h.float()
 
-    coordinates = torch.zeros(instance_image.shape + (2,))
-    g1, g2 = torch.meshgrid(torch.arange(instance_image_tensor.size()[
-                            0]), torch.arange(instance_image_tensor.size()[1]))
-    coordinates[:, :, 0] = g1
-    coordinates[:, :, 1] = g2
-    vecs = coordinates - centroids_t
+            if contours_active:
+                cont_mask = np.zeros_like(instance_image)
+                contour_class = contour_class_map[int(value.numpy()//1000)]
+                cont_mask[np.where(instance_image == value)] = 255
+                cont_img = np.zeros(instance_image.shape)
+                _, thresh = cv2.threshold(cont_mask, 127, 255, 0)
+                cnts, _ = cv2.findContours(thresh.astype(
+                    np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
+                contours[np.where(cont_img == 1.0)] = contour_class
+                cont = np.array([xs.numpy(), ys.numpy()])
+                for x in np.unique(cont[0, :]):
+                    idx = np.where(cont[0, :] == x)
+                    contours[x, np.min(cont[1, idx])] = contour_class
+                    contours[x, np.max(cont[1, idx])] = contour_class
+                for y in np.unique(cont[1, :]):
+                    idx = np.where(cont[1, :] == y)
+                    contours[np.min(cont[0, idx]), y] = contour_class
+                    contours[np.max(cont[0, idx]), y] = contour_class
 
-    mask = instance_image_tensor >= 1000
-    if len(mask.size()) > 1:
-        mask = mask.int()
-    elif mask is False:
-        mask = np.zeros(instance_image.shape)
-    else:
-        mask = np.ones(instance_image.shape)
-    vecs[:, :, 0] = vecs[:, :, 0]*mask
-    vecs[:, :, 1] = vecs[:, :, 1]*mask
-    heatmap_ = w_h - (torch.abs(vecs)*alpha)
-    heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
+    if regression_active:
+        coordinates = torch.zeros(instance_image.shape + (2,))
+        g1, g2 = torch.meshgrid(torch.arange(instance_image_tensor.size()[
+            0]), torch.arange(instance_image_tensor.size()[1]))
+        coordinates[:, :, 0] = g1
+        coordinates[:, :, 1] = g2
+        vecs = coordinates - centroids_t
 
-    heatmap_[:, :, 0] /= w_h[:, :, 0]
-    heatmap_[:, :, 1] /= w_h[:, :, 1]
-    heatmap_t = heatmap_[:, :, 0]*heatmap_[:, :, 1]
-    heatmap_t = heatmap_t*mask
-    return instance_image_tensor, vecs.permute(2, 0, 1), mask, heatmap_t, torch.tensor(contours)
+        if len(mask.size()) > 1:
+            mask = mask.int()
+        elif mask is False:
+            mask = np.zeros(instance_image.shape)
+        else:
+            mask = np.ones(instance_image.shape)
+        vecs[:, :, 0] = vecs[:, :, 0]*mask
+        vecs[:, :, 1] = vecs[:, :, 1]*mask
+        heatmap_ = w_h - (torch.abs(vecs)*alpha)
+        heatmap_ = np.clip(heatmap_, 0, torch.max(heatmap_))
 
+        heatmap_[:, :, 0] /= w_h[:, :, 0]
+        heatmap_[:, :, 1] /= w_h[:, :, 1]
+        heatmap_t = heatmap_[:, :, 0]*heatmap_[:, :, 1]
+        heatmap_t = heatmap_t*mask
 
-def compute_instance_contours(instance_image):
-    contours = np.zeros(instance_image.shape)
-    for value in np.unique(instance_image):
-        xs, ys = np.where(instance_image == value)
-        if value > 23:
-            cont = np.array([xs, ys])
-            for x in np.unique(cont[0, :]):
-                idx = np.where(cont[0, :] == x)
-                contours[x, np.min(cont[1, idx])] = 1
-                contours[x, np.max(cont[1, idx])] = 1
-            for y in np.unique(cont[1, :]):
-                idx = np.where(cont[1, :] == y)
-                contours[np.min(cont[0, idx]), y] = 1
-                contours[np.max(cont[0, idx]), y] = 1
-    kernel = np.ones((3, 3), np.uint8)
-    contours = cv2.dilate(contours, kernel, iterations=1)
-    return torch.tensor(contours)
+    if regression_active and contours_active:
+        return (instance_image_tensor, vecs.permute(2, 0, 1),
+                mask, heatmap_t, torch.tensor(contours))
+    elif regression_active:
+        return (instance_image_tensor, vecs.permute(2, 0, 1),
+                mask, heatmap_t)
+    elif contours_active:
+        return (instance_image_tensor, mask, torch.tensor(contours))
 
 
 def get_cfg(config):
     with open(config) as fp:
         cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    for task in list(cfg['tasks'].keys()):
-        if not cfg['tasks'][task]['active']:
-            del cfg['tasks'][task]
+    for task in list(cfg[TASKS].keys()):
+        if not cfg[TASKS][task][ACTIVE]:
+            del cfg[TASKS][task]
     return cfg
+
+
+def get_active_tasks(model_cfg):
+    active_outputs_cfg = copy.deepcopy(model_cfg)
+    for task in list(model_cfg.keys()):
+        if not model_cfg[task][ACTIVE]:
+            del active_outputs_cfg[task]
+
+    return active_outputs_cfg
+
+
+def map_outputs_to_task(output):
+    return get_key(OUTPUTS_TO_TASK, output)
+
+
+def get_key(_dict, val):
+    for key, value in _dict.items():
+        if val == value:
+            return key
+
+    return "key doesn't exist"

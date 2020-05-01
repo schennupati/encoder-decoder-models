@@ -12,6 +12,7 @@ PRETRAINED_PATH = 'pretrained_path'
 ROOT_PATH = 'root_path'
 LOSS_FN = 'loss_fn'
 OUTPUTS = 'outputs'
+INPUTS = 'inputs'
 ACTIVE = 'active'
 OUT_CHANNELS = 'out_channels'
 LOSS = 'loss'
@@ -25,6 +26,7 @@ DATASET = 'dataset'
 IM_SIZE = 'im_size'
 SAVE_LOGS = 'savelogs'
 LOGS = 'logs'
+POSTPROCS = 'postprocs'
 
 PARAMS = 'prams'
 EPOCHS = 'epochs'
@@ -76,10 +78,21 @@ OUTPUT_SAVE_NAME = '{epoch}_{data_type}_{task}_{state}'
 MODEL_NAME = '{time_stamp}_best-loss_{best_loss}.pkl'
 
 SEMANTIC = 'semantic'
+INSTANCE = 'instance'
+DISPARITY = 'disparity'
+PANOPTIC = 'panoptic'
+INSTANCE_SEG = 'instance_seg'
 INSTANCE_CONTOUR = 'instance_contour'
 INSTANCE_REGRESSION = 'instance_regression'
 INSTANCE_HEATMAP = 'instance_heatmap'
 INSTANCE_PROBS = 'instance_probs'
+ALL_INSTANCE_TASKS = [INSTANCE_CONTOUR, INSTANCE_REGRESSION,
+                      INSTANCE_PROBS, INSTANCE_HEATMAP]
+
+OUTPUTS_TO_TASK = {SEMANTIC: SEMANTIC,
+                   INSTANCE: ALL_INSTANCE_TASKS,
+                   DISPARITY: DISPARITY}
+
 
 MILLION = 1e7
 START_ITER = 0

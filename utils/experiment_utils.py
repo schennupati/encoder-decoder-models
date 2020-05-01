@@ -18,14 +18,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
-from utils.data_utils import convert_targets, convert_outputs, \
-    post_process_outputs, get_weights
 from utils.metrics import metrics
 from utils.dataloader import get_dataloaders
-from utils.loss_utils import compute_loss, loss_meters, MultiTaskLoss, \
-    averageMeter
-from utils.im_utils import cat_labels, prob_labels, inst_labels, decode_segmap
+from utils.loss_utils import loss_meters, MultiTaskLoss, averageMeter
+from utils.im_utils import cat_labels, prob_labels, inst_labels
 from utils.writer_utils import add_images_to_writer
+from utils.data_utils import get_labels, get_weights, get_predictions, \
+    post_process_predictions
 from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     START_ITER, PLATEAU_COUNT, STATE, GPU_STR, GPU_ID, CPU, PARAMS, MODEL, \
     ENCODER, DECODER, DATA, IM_SIZE, PRETRAINED_PATH, ROOT_PATH, RESULTS_DIR, \
@@ -33,8 +32,8 @@ from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     PATIENCE, PRINT_INTERVAL, RESUME, MODEL_STATE, OPTIMIZER_STATE, LOSS_FN, \
     CRITERION_STATE, EPOCH, EPOCH_STR, OUTPUTS, OPTIMIZER, LOSS_STR, \
     TASK_LOSS, TRAIN_STR, VAL_STR, VAL_LOSS_STR, METRICS_STR, PATIENCE_STR, \
-    EARLY_STOP_STR, TASK_STR, SEMANTIC, INSTANCE_PROBS, INSTANCE_CONTOUR
-from instance_to_clusters import get_clusters, imshow_components, to_rgb
+    EARLY_STOP_STR, TASK_STR, SEMANTIC, INSTANCE_PROBS, INSTANCE_CONTOUR, \
+    POSTPROC
 
 
 class ExperimentLoop():
@@ -169,9 +168,9 @@ class ExperimentLoop():
         self.optimizer.zero_grad()
         running_loss = averageMeter()
         inputs, targets = data
-        outputs = self.model(inputs.to(self.device))
-        targets = convert_targets(targets, self.cfg[TASKS], self.device)
-        losses, loss = self.criterion(outputs, targets)
+        logits = self.model(inputs.to(self.device))
+        labels = get_labels(targets, self.cfg, self.device)
+        losses, loss = self.criterion(logits, labels)
         running_loss.update(loss)
         loss.backward()
         self.optimizer.step()
@@ -185,16 +184,15 @@ class ExperimentLoop():
                                    epoch*self.n_batches + batch)
             loss_str = LOSS_STR.format(epoch=epoch+1, batch=batch,
                                        loss=running_loss.avg)
-            predictions = post_process_outputs(outputs,
-                                               self.cfg[MODEL][OUTPUTS],
-                                               targets)
+            predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                          labels)
 
             for task, loss in self.train_loss_meters.meters.items():
                 loss_str += TASK_LOSS.format(task, loss.avg)
                 self.writer.add_scalar('Loss/train_{}'.format(task),
                                        loss.avg,
                                        epoch*self.n_batches + batch)
-                self.writer.add_images_to_writer(inputs, predictions, targets,
+                self.writer.add_images_to_writer(inputs, predictions, labels,
                                                  self.writer, epoch, task,
                                                  state=self.mode,
                                                  save_to_disk=False)
@@ -213,19 +211,19 @@ class ExperimentLoop():
         with torch.no_grad():
             for i, data in tqdm(enumerate(self.dataloaders[VAL])):
                 inputs, targets = data
-                outputs = self.model(inputs.to(self.device))
-                targets = convert_targets(targets, self.cfg[TASKS],
-                                          self.device)
-                val_losses, val_loss = self.criterion(outputs, targets)
+                logits = self.model(inputs.to(self.device))
+                labels = get_labels(targets, self.cfg, self.device)
+                val_losses, val_loss = self.criterion(logits, labels)
                 self.val_loss_meters.update(val_losses)
                 running_val_loss.update(val_loss)
-                predictions = post_process_outputs(outputs,
-                                                   self.cfg[MODEL][OUTPUTS],
-                                                   targets)
-                self.val_metrics.update(targets, predictions)
+                predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                              labels)
+                outputs = post_process_predictions(predictions,
+                                                   self.cfg[POSTPROC])
+                self.val_metrics.update(labels, predictions)
                 if self.mode == VAL:
                     for task, _ in self.val_loss_meters.meters.items():
-                        add_images_to_writer(inputs, predictions, targets,
+                        add_images_to_writer(inputs, predictions, labels,
                                              self.writer, i, task,
                                              state=self.mode,
                                              save_to_disk=True)
@@ -236,11 +234,11 @@ class ExperimentLoop():
             print(TASK_LOSS.format(task=task, loss=loss.avg))
             self.writer.add_scalar('Loss/Validation_{}'.format(task),
                                    loss.avg, epoch)
-            add_images_to_writer(inputs, predictions, targets, self.writer,
+            add_images_to_writer(inputs, predictions, labels, self.writer,
                                  epoch, task, state=VAL, save_to_disk=False)
 
         self.val_loss_meters.reset()
-        self.val_metrics.update(targets, predictions)
+        self.val_metrics.update(labels, predictions)
         print_metrics(self.val_metrics)
         self.val_metrics.reset()
         self.val_loss = running_val_loss.avg()
@@ -362,9 +360,8 @@ def get_save_path(cfg, best_loss=None):
     """
     exp_dir_path, exp_name, network_name = get_exp_dir(cfg)
     time_stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
-    path = os.path.join(exp_dir_path, MODEL_NAME.
-                        format(time_stamp=time_stamp,
-                               best_loss=best_loss))
+    path = os.path.join(exp_dir_path, MODEL_NAME.format(time_stamp=time_stamp,
+                                                        best_loss=best_loss))
 
     return path, network_name, exp_name, time_stamp
 

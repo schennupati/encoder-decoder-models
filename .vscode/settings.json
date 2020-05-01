@@ -11,14 +11,18 @@
 "html.format.wrapLineLength": 80,
 "editor.wordWrap": "wordWrapColumn",
 "cSpell.words": [
+    "POSTPROCS",
     "PROBS",
     "cuda",
     "gpus",
     "imshow",
     "imsize",
     "nargs",
+    "numpy",
+    "pyplot",
     "segmap",
     "strftime",
-    "tqdm"
+    "tqdm",
+    "unsqueeze"
 ]
 }
