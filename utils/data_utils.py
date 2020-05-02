@@ -313,7 +313,6 @@ def _get_instance_from_contour(mask, seg, contours):
     for i in np.unique(contours):
         if i != 0:
             contour = (contours == i).astype(np.uint8)
-
             diff = seg*mask*contour
             _, labels = cv2.connectedComponents(diff.astype(np.uint8))
             inst += diff*1000 + labels

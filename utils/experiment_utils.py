@@ -226,11 +226,12 @@ class ExperimentLoop():
                 running_val_loss.update(val_loss)
                 predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                               labels)
-                outputs = post_process_predictions(predictions,
-                                                   self.cfg[POSTPROCS])
                 self.val_metrics.update(labels, predictions)
-                self.post_proc_metrics.update(labels, outputs)
+
                 if self.mode == VAL:
+                    outputs = post_process_predictions(predictions,
+                                                       self.cfg[POSTPROCS])
+                    self.post_proc_metrics.update(labels, outputs)
                     self.send_predictions_to_writer(inputs, predictions,
                                                     labels,
                                                     self.val_loss_meters, i,
@@ -253,7 +254,8 @@ class ExperimentLoop():
                                             self.post_proc_metrics, i)
 
         print_metrics(self.val_metrics)
-        print_metrics(self.post_proc_metrics)
+        if self.mode == VAL:
+            print_metrics(self.post_proc_metrics)
         self.val_loss_meters.reset()
         self.val_metrics.reset()
         self.post_proc_metrics.reset()
