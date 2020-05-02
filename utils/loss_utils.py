@@ -13,7 +13,6 @@ from utils.loss import (cross_entropy2d, bootstrapped_cross_entropy2d,
                         multi_scale_cross_entropy2d, huber_loss, mae_loss,
                         mse_loss, instance_loss, weighted_binary_cross_entropy)
 from utils.data_utils import get_weights
-from utils.train_utils import get_device
 
 loss_map = {
     'cross_entropy2d': (cross_entropy2d),

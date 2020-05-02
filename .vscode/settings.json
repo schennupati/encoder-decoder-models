@@ -13,10 +13,12 @@
 "cSpell.words": [
     "POSTPROCS",
     "PROBS",
+    "Predicitons",
     "cuda",
     "gpus",
     "imshow",
     "imsize",
+    "iscrowd",
     "nargs",
     "numpy",
     "pyplot",

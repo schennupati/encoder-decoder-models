@@ -28,7 +28,7 @@ SAVE_LOGS = 'savelogs'
 LOGS = 'logs'
 POSTPROCS = 'postprocs'
 
-PARAMS = 'prams'
+PARAMS = 'params'
 EPOCHS = 'epochs'
 PATIENCE = 'patience'
 EARLY_STOP = 'early_stop'
@@ -49,7 +49,7 @@ PLOTS_DIR = os.path.join(RESULTS_DIR, 'plots')
 EXPERIMENT_NAME = '{encoder_name}-{decoder_name}-{imsize}'
 LOSS_STR = "epoch: {epoch} batch: {batch} loss: {loss}"
 TASK_LOSS = " {task}_loss: {loss}"
-EPOCH_STR = '\n******** Epoch {epoch} *********'
+EPOCH_STR = '\n*********** Epoch {epoch} ***********'
 TRAIN_STR = '************* Training ***********'
 VAL_STR = '\n************ Validation **********'
 METRICS_STR = '\n************* Metrics ************'
@@ -57,6 +57,8 @@ TASK_STR = '*********** {task} **********'
 VAL_LOSS_STR = "\nepoch: {epoch} validation_loss: {loss}"
 PATIENCE_STR = 'Patience of {patience} epochs reached.'
 EARLY_STOP_STR = 'Early Stopping after {epoch} epochs: '
+
+
 PNG = '.png'
 PKL = '.pkl'
 TRAIN = 'train'
@@ -64,6 +66,9 @@ VAL = 'val'
 
 HWC = 'HWC'
 CHW = 'CHW'
+DOUBLE = 'double'
+LONG = 'long'
+FLOAT = 'float'
 
 GT = 'gt'
 DET = 'det'
@@ -86,6 +91,10 @@ INSTANCE_CONTOUR = 'instance_contour'
 INSTANCE_REGRESSION = 'instance_regression'
 INSTANCE_HEATMAP = 'instance_heatmap'
 INSTANCE_PROBS = 'instance_probs'
+INSTANCE_IMAGE = 'instance_image'
+PANOPTIC_IMAGE = 'panoptic_image'
+SEGMENT_INFO = 'segment_info'
+
 ALL_INSTANCE_TASKS = [INSTANCE_CONTOUR, INSTANCE_REGRESSION,
                       INSTANCE_PROBS, INSTANCE_HEATMAP]
 
@@ -97,8 +106,11 @@ OUTPUTS_TO_TASK = {SEMANTIC: SEMANTIC,
 MILLION = 1e7
 START_ITER = 0
 PLATEAU_COUNT = 0
+VOID = 255
 STATE = None
 
 
 GPU_STR = 'cuda:{gpu_id}'
 CPU = 'cpu'
+
+ARGMAX = 'argmax'

@@ -1,6 +1,7 @@
 """Writer utilities to support sending data to Tensorboard or disk ."""
 
 import os
+import torch
 import numpy as np
 import matplotlib
 from utils.im_utils import decode_segmap, labels, inst_labels, prob_labels, \
@@ -8,12 +9,11 @@ from utils.im_utils import decode_segmap, labels, inst_labels, prob_labels, \
 from utils.constants import PLOTS_DIR, TRAIN, VAL, HWC, CHW, INPUT_IMAGE, \
     IMAGES, SEMANTIC, INSTANCE_CONTOUR, INSTANCE_REGRESSION, INSTANCE_HEATMAP,\
     INSTANCE_PROBS, INPUT_SAVE_NAME, OUTPUT_SAVE_NAME, INPUT_WRITER_NAME, \
-    OUTPUT_WRITER_NAME, DET, GT, PNG
+    OUTPUT_WRITER_NAME, DET, GT, PNG, PANOPTIC, PANOPTIC_IMAGE
 
 
-def add_input_to_writer(inputs, writer, epoch,
-                        state=TRAIN, sample_idx=0, save_to_disk=False,
-                        dataformats=HWC):
+def add_input_to_writer(inputs, writer, epoch, state=TRAIN, sample_idx=0,
+                        save_to_disk=False, dataformats=HWC):
     """Add network input to writer.
 
     Arguments:
@@ -30,10 +30,10 @@ def add_input_to_writer(inputs, writer, epoch,
     """
     name_to_writer = INPUT_WRITER_NAME.format(state=state)
     name_to_save = INPUT_SAVE_NAME.format(epoch=epoch, state=state)
-    img = inputs[sample_idx, ...]
+    img = inputs[sample_idx, ...].squeeze()
     writer.add_image(name_to_writer, img, epoch, dataformats=dataformats)
     if save_to_disk:
-        save_image_to_disk(img, name_to_save, dataformats)
+        save_image_to_disk(img, name_to_save, sample_idx, dataformats)
 
 
 def add_output_to_writer(predictions, targets, writer, epoch,
@@ -79,11 +79,11 @@ def write_task_data(data, writer, epoch, task=SEMANTIC,
          (default: {0})
         data_type {str} -- [Ground truth or prediction] (default: {GT})
     """
-    data = get_sample(data, task, sample_idx, state)
-    output = generate_task_visuals(data, task)
+    data = get_sample(data, state, sample_idx)
+    output = generate_task_visuals(data.squeeze(), task)
     name_to_writer = OUTPUT_WRITER_NAME.format(
         state=state, data_type=DET, task=task)
-    add_image_to_writer(output, epoch, writer, name_to_writer)
+    add_image_to_writer(output, writer, epoch, name_to_writer)
 
 
 def add_image_to_writer(img, writer, epoch, name_to_writer, dataformats=HWC):
@@ -101,12 +101,11 @@ def add_image_to_writer(img, writer, epoch, name_to_writer, dataformats=HWC):
     writer.add_image(name_to_writer, img, epoch, dataformats=dataformats)
 
 
-def get_sample(data, task, state=TRAIN, sample_idx=0):
+def get_sample(data, state=TRAIN, sample_idx=0):
     """Get a sample from batch of data
 
     Arguments:
         data {dict} -- [Predictions(DET) or Targets(GT)]
-        task {str} -- [Type of task] (default: {SEMANTIC})
 
     Keyword Arguments:
         state {str} -- [training or validation state] (default: {TRAIN})
@@ -116,9 +115,9 @@ def get_sample(data, task, state=TRAIN, sample_idx=0):
     Returns:
         [np.ndarray] -- [Selected sample placed on cpu in numpy datatype]
     """
-    data = data[task][sample_idx, ...]
-    data = data.detach() if state == TRAIN else data
-    data = data.cpu().numpy()
+    data = data[sample_idx, ...]
+    if torch.is_tensor(data):
+        data = data.cpu().numpy()
     return data
 
 
@@ -132,8 +131,6 @@ def generate_task_visuals(data, task):
     Returns:
         [np.ndarray] -- [Visualization image for the given task]
     """
-    if len(data.shape) == 2:
-        data = data.unsqueeze(0)
     if task == SEMANTIC:
         data = decode_segmap(data, nc=19, labels=labels)
     elif task == INSTANCE_CONTOUR:
@@ -169,13 +166,15 @@ def save_image_to_disk(image, name, sample_idx=0,
         image = image.squeeze()
     elif len(shape) == 2:
         image = image.unsqueeze(0)
-    image = (image.permute(1, 2, 0)).numpy() if dataformats == CHW else image
+    image = image.permute(1, 2, 0) if dataformats == CHW else image
+    image = image.numpy()
     fname = os.path.join(path, name + PNG)
     matplotlib.image.imsave(fname, image.astype(np.uint8))
 
 
 def add_images_to_writer(inputs, predictions, targets, writer,
-                         epoch, task=SEMANTIC, state=TRAIN, save_to_disk=False):
+                         epoch, task=SEMANTIC, state=TRAIN,
+                         save_to_disk=False):
     """[Adds images of inputs/outputs to tf.writer]
 
     Arguments:
@@ -190,10 +189,14 @@ def add_images_to_writer(inputs, predictions, targets, writer,
         state {str} -- [training or validation state] (default: {TRAIN})
         save_to_disk {bool} -- Whether to save images to disk (default: {False})
     """
+    if task == PANOPTIC:
+        predictions = predictions[PANOPTIC_IMAGE]
+        targets = targets[PANOPTIC_IMAGE]
     batch_size = predictions.shape[0]
     sample_idx = np.random.randint(0, batch_size, size=1)
-
-    add_input_to_writer(inputs, writer, epoch, sample_idx, state,
-                        save_to_disk, dataformats=CHW)
+    if inputs is not None:
+        add_input_to_writer(inputs, writer, epoch, state, sample_idx,
+                            save_to_disk, dataformats=CHW)
     add_output_to_writer(predictions, targets, writer, epoch,
-                         task, state, sample_idx, save_to_disk, HWC)
+                         task, state, sample_idx, save_to_disk,
+                         dataformats=HWC)

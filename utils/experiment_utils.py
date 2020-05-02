@@ -15,13 +15,16 @@ import scipy.misc
 from tqdm import tqdm
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+from prettytable import PrettyTable
+from texttable import Texttable
+
 
 from utils.encoder_decoder import get_encoder_decoder
 from utils.optimizers import get_optimizer
 from utils.metrics import metrics
 from utils.dataloader import get_dataloaders
 from utils.loss_utils import loss_meters, MultiTaskLoss, averageMeter
-from utils.im_utils import cat_labels, prob_labels, inst_labels
+from utils.im_utils import cat_labels, prob_labels, inst_labels, labels
 from utils.writer_utils import add_images_to_writer
 from utils.data_utils import get_labels, get_weights, get_predictions, \
     post_process_predictions
@@ -33,7 +36,7 @@ from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     CRITERION_STATE, EPOCH, EPOCH_STR, OUTPUTS, OPTIMIZER, LOSS_STR, \
     TASK_LOSS, TRAIN_STR, VAL_STR, VAL_LOSS_STR, METRICS_STR, PATIENCE_STR, \
     EARLY_STOP_STR, TASK_STR, SEMANTIC, INSTANCE_PROBS, INSTANCE_CONTOUR, \
-    POSTPROC
+    POSTPROC, POSTPROCS, PANOPTIC
 
 
 class ExperimentLoop():
@@ -84,6 +87,7 @@ class ExperimentLoop():
         self.print_interval = params[PRINT_INTERVAL]
         self.resume_training = params[RESUME]
         self.exp_dir, _, _ = get_exp_dir(cfg)
+        self.plateau_count = 0
 
     def get_criterion(self):
         """Get criterion for the current experiment."""
@@ -112,10 +116,12 @@ class ExperimentLoop():
     def get_losses_and_metrics(self):
         """Get loss and metric meters to log them during experiments."""
         out_model_cfg = self.cfg[MODEL][OUTPUTS]
+        post_proc_cfg = self.cfg[POSTPROCS]
 
         self.train_loss_meters = loss_meters(out_model_cfg)
         self.val_loss_meters = loss_meters(out_model_cfg)
         self.val_metrics = metrics(out_model_cfg)
+        self.post_proc_metrics = metrics(post_proc_cfg)
 
     def load_checkpoint(self):
         """Load a checkpoint from experiments dir."""
@@ -138,13 +144,15 @@ class ExperimentLoop():
     def train(self):
         """Train a model on a entire train data for several epochs."""
         for epoch in range(self.epochs):
-            print(EPOCH_STR.format(epoch+1))
+            print(EPOCH_STR.format(epoch=epoch+1))
             print(TRAIN_STR)
             self.n_batches = len(self.dataloaders[TRAIN])
+            self.train_running_loss = averageMeter()
             for batch_id, data in tqdm(enumerate(self.dataloaders[TRAIN])):
                 self.train_step(data, epoch, batch_id)
-                self.validation_step(epoch)
-
+                break
+            self.validation_step(epoch)
+            self.train_loss_meters.reset()
             self.save_model(epoch)
             if self.stop_training(epoch):
                 self.writer.close()
@@ -166,39 +174,37 @@ class ExperimentLoop():
 
         """
         self.optimizer.zero_grad()
-        running_loss = averageMeter()
+
         inputs, targets = data
         logits = self.model(inputs.to(self.device))
         labels = get_labels(targets, self.cfg, self.device)
         losses, loss = self.criterion(logits, labels)
-        running_loss.update(loss)
+        self.train_running_loss.update(loss)
+        self.train_loss_meters.update(losses)
         loss.backward()
         self.optimizer.step()
-        self.train_loss_meters.update(losses)
 
         if (batch % self.print_interval == 0 or batch == self.n_batches-1):
             loss_weights = [p.data for p in self.criterion.parameters()]
             print('\nLoss weights {}'.format(loss_weights))
 
-            self.writer.add_scalar('Loss/train', running_loss.avg,
+            self.writer.add_scalar('Loss/train', self.train_running_loss.avg,
                                    epoch*self.n_batches + batch)
             loss_str = LOSS_STR.format(epoch=epoch+1, batch=batch,
-                                       loss=running_loss.avg)
+                                       loss=self.train_running_loss.avg)
             predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                           labels)
 
             for task, loss in self.train_loss_meters.meters.items():
-                loss_str += TASK_LOSS.format(task, loss.avg)
+                loss_str += TASK_LOSS.format(task=task, loss=loss.avg)
                 self.writer.add_scalar('Loss/train_{}'.format(task),
                                        loss.avg,
                                        epoch*self.n_batches + batch)
-                self.writer.add_images_to_writer(inputs, predictions, labels,
-                                                 self.writer, epoch, task,
-                                                 state=self.mode,
-                                                 save_to_disk=False)
+            self.send_predictions_to_writer(inputs, predictions, labels,
+                                            self.train_loss_meters, epoch,
+                                            save_to_disk=False)
             print(loss_str)
-        running_loss.reset()
-        self.train_loss_meters.reset()
+        self.train_running_loss.reset()
 
     def validation_step(self, epoch):
         """Validate a model on a batch of data.
@@ -212,37 +218,62 @@ class ExperimentLoop():
             for i, data in tqdm(enumerate(self.dataloaders[VAL])):
                 inputs, targets = data
                 logits = self.model(inputs.to(self.device))
-                labels = get_labels(targets, self.cfg, self.device)
+                labels = get_labels(targets, self.cfg, self.device,
+                                    get_postprocs=True)
                 val_losses, val_loss = self.criterion(logits, labels)
                 self.val_loss_meters.update(val_losses)
                 running_val_loss.update(val_loss)
                 predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                               labels)
                 outputs = post_process_predictions(predictions,
-                                                   self.cfg[POSTPROC])
+                                                   self.cfg[POSTPROCS])
                 self.val_metrics.update(labels, predictions)
+                self.post_proc_metrics.update(labels, outputs)
                 if self.mode == VAL:
-                    for task, _ in self.val_loss_meters.meters.items():
-                        add_images_to_writer(inputs, predictions, labels,
-                                             self.writer, i, task,
-                                             state=self.mode,
-                                             save_to_disk=True)
-        print(VAL_LOSS_STR.format(epoch=epoch + 1,
-                                  loss=running_val_loss.avg))
-        self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
-        for task, loss in self.val_loss_meters.meters.items():
-            print(TASK_LOSS.format(task=task, loss=loss.avg))
-            self.writer.add_scalar('Loss/Validation_{}'.format(task),
-                                   loss.avg, epoch)
-            add_images_to_writer(inputs, predictions, labels, self.writer,
-                                 epoch, task, state=VAL, save_to_disk=False)
+                    self.send_predictions_to_writer(inputs, predictions,
+                                                    labels,
+                                                    self.val_loss_meters, i,
+                                                    save_to_disk=True)
+                    self.send_outputs_to_writer(outputs, labels,
+                                                self.post_proc_metrics, i,
+                                                save_to_disk=True)
+        if self.mode != VAL:
+            print(VAL_LOSS_STR.format(epoch=epoch + 1,
+                                      loss=running_val_loss.avg))
+            self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
+            for task, loss in self.val_loss_meters.meters.items():
+                print(TASK_LOSS.format(task=task, loss=loss.avg))
+                self.writer.add_scalar('Loss/Validation_{}'.format(task),
+                                       loss.avg, epoch)
+                self.send_predictions_to_writer(inputs, predictions,
+                                                labels,
+                                                self.val_loss_meters, i,
+                                                save_to_disk=True)
+                self.send_outputs_to_writer(outputs, labels,
+                                            self.post_proc_metrics, i,
+                                            save_to_disk=True)
 
-        self.val_loss_meters.reset()
-        self.val_metrics.update(labels, predictions)
         print_metrics(self.val_metrics)
+        print_metrics(self.post_proc_metrics)
+        self.val_loss_meters.reset()
         self.val_metrics.reset()
-        self.val_loss = running_val_loss.avg()
+        self.post_proc_metrics.reset()
+        self.val_loss = running_val_loss.avg.data
         running_val_loss.reset()
+
+    def send_predictions_to_writer(self, inputs, predictions, labels, meters,
+                                   epoch=1, save_to_disk=False):
+        for task in meters.meters.keys():
+            add_images_to_writer(inputs, predictions[task], labels[task],
+                                 self.writer, epoch, task, state=self.mode,
+                                 save_to_disk=True)
+
+    def send_outputs_to_writer(self, outputs, labels, metrics, epoch=1,
+                               save_to_disk=False):
+        for task in metrics.metrics.keys():
+            add_images_to_writer(None, outputs[task], labels[task],
+                                 self.writer, epoch, task, state=self.mode,
+                                 save_to_disk=True)
 
     def save_model(self, epoch):
         """Save model to checkpoint.
@@ -499,15 +530,32 @@ def print_metrics(metrics):
     for task in metrics.metrics.keys():
         if metrics.metrics[task] is not None:
             score, class_iou = metrics.metrics[task].get_scores()
-            print(TASK_STR.format(task=task))
             if isinstance(score, dict):
-                [print(k, '\t :', v) for k, v in score.items()]
+                header = score.keys()
+                t = PrettyTable(header)
+                t.title(task)
+                t.add_row(['{:05.3f}'.format(score[k] * 100)
+                           for k in score.keys()])
+                print(t)
                 if task == SEMANTIC:
-                    [print(cat_labels[k].name, '\t :', v)
-                     for k, v in class_iou.items()]
+                    print_table(class_iou, cat_labels)
                 elif task == INSTANCE_PROBS:
-                    [print(prob_labels[k].name, '\t :', v)
-                     for k, v in class_iou.items()]
+                    print_table(class_iou, prob_labels)
                 elif task == INSTANCE_CONTOUR:
-                    [print(inst_labels[k].name, '\t :', v)
-                     for k, v in class_iou.items()]
+                    print_table(class_iou, inst_labels)
+                elif task == PANOPTIC:
+                    t = PrettyTable(['Category']+list(class_iou.keys()))
+                    for label in labels:
+                        if label.ignoreInEval:
+                            continue
+                        row = ([label.name] + ['{:05.3f}'.format(
+                            class_iou[metric][label.id]*100)
+                            for metric in class_iou.keys()])
+                        t.add_row(row)
+                    print(t)
+
+
+def print_table(data, labels):
+    t = PrettyTable([labels[k].name for k in data.keys()])
+    t.add_row(['{:05.3f}'.format(v*100) for v in data.values()])
+    print(t)

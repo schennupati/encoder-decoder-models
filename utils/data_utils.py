@@ -12,7 +12,9 @@ from utils.im_utils import labels, prob_labels, trainId2label, id2label, \
     decode_segmap, inst_labels
 from utils.constants import TASKS, MODEL, OUTPUTS, TYPE, SEMANTIC, INSTANCE, \
     DISPARITY, PANOPTIC, ACTIVE, OUTPUTS_TO_TASK, INSTANCE_REGRESSION, \
-    INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS
+    INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS, \
+    INSTANCE_IMAGE, PANOPTIC, PANOPTIC_IMAGE, SEGMENT_INFO, DOUBLE, LONG, \
+    FLOAT, POSTPROC, ARGMAX
 from instance_to_clusters import get_clusters, imshow_components, to_rgb
 
 
@@ -111,8 +113,8 @@ def convert_targets_instance(targets, permute=(0, 2, 3, 1),
     # TODO: Please clean this up.
     n, h, w, targets = prepare_targets(targets, permute)
     masks = torch.zeros((n, h, w))
+    imgs = torch.zeros((n, h, w))
     if regression_active:
-        imgs = torch.zeros((n, h, w))
         vecs = torch.zeros((n, 2, h, w))
         heatmaps = torch.zeros((n, h, w))
     if contours_active:
@@ -141,34 +143,28 @@ def convert_targets_instance(targets, permute=(0, 2, 3, 1),
             masks[i, :, :] = mask.long()
             contours[i, :, :] = contour.long()
     if regression_active and contours_active:
-        converted_targets = {'instance_image': imgs,
-                             'instance_regression': vecs,
-                             'instance_probs': masks,
-                             'instance_heatmap': heatmaps,
-                             'instance_contour': contours}
+        converted_targets = {INSTANCE_IMAGE: imgs,
+                             INSTANCE_REGRESSION: vecs,
+                             INSTANCE_PROBS: masks,
+                             INSTANCE_HEATMAP: heatmaps,
+                             INSTANCE_CONTOUR: contours}
     elif contours_active:
-        converted_targets = {'instance_image': imgs,
-                             'instance_probs': masks,
-                             'instance_contour': contours}
+        converted_targets = {INSTANCE_IMAGE: imgs,
+                             INSTANCE_PROBS: masks,
+                             INSTANCE_CONTOUR: contours}
     elif regression_active:
-        converted_targets = {'instance_image': imgs,
-                             'instance_regression': vecs,
-                             'instance_probs': masks,
-                             'instance_heatmap': heatmaps}
+        converted_targets = {INSTANCE_IMAGE: imgs,
+                             INSTANCE_REGRESSION: vecs,
+                             INSTANCE_PROBS: masks,
+                             INSTANCE_HEATMAP: heatmaps}
     return converted_targets
 
 
 def convert_targets_panoptic(targets, permute=(0, 2, 3, 1)):
     n, h, w, targets = prepare_targets(targets, permute)
-    pan_segs = torch.zeros((n, h, w, 3))
-    segInfos = {i: [] for i in range(n)}
-    for i in range(n):
-        pan_seg, segInfo = getPanopticEval(targets[i, :, :])
-        pan_segs[i, :, :, :] = pan_seg
-        segInfos[i] = segInfo
+    panoptic = getPanopticEval(targets)
 
-    converted_targets = {'panoptic_image': pan_segs,
-                         'segment_info': segInfos}
+    converted_targets = {PANOPTIC: panoptic}
 
     return converted_targets
 
@@ -185,15 +181,15 @@ def get_labels_fn(task):
 
 
 def convert_data_type(data, data_type):
-    if data_type == 'double':
+    if data_type == DOUBLE:
         return data.double()
-    elif data_type == 'long':
+    elif data_type == LONG:
         return data.long()
-    elif data_type == 'float':
+    elif data_type == FLOAT:
         return data.float()
 
 
-def get_labels(in_targets, cfg, device=None):
+def get_labels(in_targets, cfg, device=None, get_postprocs=False):
     labels = {}
     active_outputs = get_active_tasks(cfg[MODEL][OUTPUTS])
     active_postprocs = get_active_tasks(cfg[POSTPROCS])
@@ -212,16 +208,18 @@ def get_labels(in_targets, cfg, device=None):
                 True if INSTANCE_CONTOUR in active_outputs else False)
             regression_active = (
                 True if INSTANCE_REGRESSION in active_outputs else False)
-            dict_targets = label_fn(
-                targets, contours_active, regression_active)
-            panoptic_active = True if PANOPTIC in active_postprocs else False
-            if panoptic_active:
-                dict_targets.update(convert_targets_panoptic(targets))
 
+            dict_targets = label_fn(targets, (0, 2, 3, 1),
+                                    contours_active, regression_active)
             for task in dict_targets.keys():
                 dict_targets[task] = dict_targets[task].to(device)
 
-        labels.update(dict_targets)
+            panoptic_active = True if PANOPTIC in active_postprocs else False
+
+            if panoptic_active and get_postprocs:
+                dict_targets.update(convert_targets_panoptic(targets))
+
+            labels.update(dict_targets)
 
     return labels
 
@@ -229,86 +227,103 @@ def get_labels(in_targets, cfg, device=None):
 def get_predictions(logits, cfg, targets):
     predictions = {}
     for task in logits.keys():
-        if cfg[task]['postproc'] == 'argmax':
+        if cfg[task][POSTPROC] == ARGMAX:
             predictions[task] = torch.argmax(logits[task], dim=1)
         else:
             predictions[task] = logits[task]
     return predictions
 
 
-def get_labels_fn(task):
-    if task == PANOPTIC:
-        return (convert_targets_semantic)
-    else:
-        return None
-
-
 def post_process_predictions(predictions, post_proc_cfg):
     outputs = {}
     for task in post_proc_cfg.keys():
-        if cfg[task][ACTIVE]:
-            inputs_cfg = cfg[task][INPUTS]
+        if post_proc_cfg[task][ACTIVE]:
+            inputs_cfg = post_proc_cfg[task][INPUTS]
             inputs = get_active_tasks(inputs_cfg)
-            outputs[task] = genrateInstanceFromPredictions(predictions,
-                                                           inputs)
+            predicted_tasks = set(predictions.keys())
+            input_tasks = set(inputs.keys())
+
+            if not input_tasks.issubset(predicted_tasks):
+                raise ValueError("""Inputs to postproc are not a subset
+                                  of network predictions. Inputs: {},
+                                  prediction: {}""".format(input_tasks,
+                                                           predicted_tasks))
+
+            outputs[task] = generatePanopticFromPredictions(predictions,
+                                                            inputs)
     return outputs
 
 
 def generatePanopticFromPredictions(predictions, inputs):
-    semantic = generateSemanticFromPredictions(predictions, inputs)
+    semantic = generateSemanticFromPredictions(predictions)
     instance = genrateInstanceFromPredictions(predictions, inputs)
-    mask = generateMaskFromPredicitons(predictions, inputs)
-    panoptic = semantic*mask + instance
+    mask = generateMaskFromPredicitons(predictions)
+    panoptic = semantic*(1-mask) + instance
     panoptic = getPanopticEval(panoptic, useTrainId=True)
 
     return panoptic
 
 
 def genrateInstanceFromPredictions(predictions, inputs):
-    semantic = generateSemanticFromPredictions(predictions, inputs)
-    mask = generateMaskFromPredicitons(predictions, inputs)
+    semantic = generateSemanticFromPredictions(predictions)
+    mask = generateMaskFromPredicitons(predictions)
+    contours = generateMaskFromPredicitons(predictions)
 
     if INSTANCE_CONTOUR in inputs:
-        contours = predictions[INSTANCE_CONTOUR]
         instance = getInstanceFromContour(mask, semantic, contours)
 
     return instance
 
 
-def generateSemanticFromPredictions(predictions, inputs):
-    if SEMANTIC not in inputs:
-        raise ValueError('Expected {} in {}'.format(SEMANTIC, inputs))
+def generateSemanticFromPredictions(predictions):
+    semantic = predictions.get(SEMANTIC, None)
+    if semantic is not None:
+        return semantic.detach().cpu().numpy()
     else:
-        semantic = predictions[SEMANTIC]
+        raise ValueError('{} not found in {}'.format(SEMANTIC,
+                                                     predictions.keys()))
 
-    return semantic
 
-
-def generateMaskFromPredicitons(predictions, inputs):
-    semantic = generateSemanticFromPredictions(predictions, inputs)
-    if INSTANCE_PROBS not in inputs:
-        mask = (semantic >= 11).astype(np.uint8)
+def generateContoursFromPredictions(predictions):
+    contours = predictions.get(INSTANCE_CONTOUR, None)
+    if contours is not None:
+        return contours.detach().cpu().numpy()
     else:
-        mask = predictions[INSTANCE_PROBS]
+        raise ValueError('{} not found in {}'.format(INSTANCE_CONTOUR,
+                                                     predictions.keys()))
 
-    return mask
+
+def generateMaskFromPredicitons(predictions):
+    semantic = generateSemanticFromPredictions(predictions)
+    #mask = predictions.get(INSTANCE_PROBS, None)
+    # if mask is None:
+    return (semantic >= 11).astype(np.uint8)
+    # return mask.detach().cpu().numpy()
 
 
 def getInstanceFromContour(mask, seg, contours):
     inst = np.zeros_like(seg)
+    for i in range(inst.shape[0]):
+        inst[i] = _get_instance_from_contour(mask[i], seg[i], contours[i])
+    return inst
+
+
+def _get_instance_from_contour(mask, seg, contours):
+    inst = np.zeros_like(seg)
     for i in np.unique(contours):
         if i != 0:
             contour = (contours == i).astype(np.uint8)
-            diff = seg*mask*(1-contour)
-            _, labels = cv2.connectedComponents(diff.astype(np.uint8))
-            inst += (i+10)*1000 + labels*(1-contour)
 
+            diff = seg*mask*contour
+            _, labels = cv2.connectedComponents(diff.astype(np.uint8))
+            inst += diff*1000 + labels
     return inst
 
 
 def getPanopticEval(inst, useTrainId=False):
-    panoptic_seg = np.zeros((inst.shape + (3, )), dtype=np.uint8)
-    inst = inst.numpy()
+    panoptic_seg = np.zeros((inst.shape + (3,)), dtype=np.uint8)
+    if torch.is_tensor(inst):
+        inst = inst.numpy()
     segmentIds = np.unique(inst)
     segmInfo = []
     for segmentId in segmentIds:
@@ -334,7 +349,7 @@ def getPanopticEval(inst, useTrainId=False):
         color = [segmentId % 256, segmentId // 256, segmentId // 256 // 256]
         panoptic_seg[mask] = color
 
-        area = np.sum(mask)  # segment area computation
+        area = np.sum(mask.astype(np.uint8))  # segment area computation
 
         # bbox computation for a segment
         hor = np.sum(mask, axis=0)
@@ -346,14 +361,15 @@ def getPanopticEval(inst, useTrainId=False):
         y = vert_idx[0]
         height = vert_idx[-1] - y + 1
         bbox = [int(x), int(y), int(width), int(height)]
-
         segmInfo.append({"id": int(segmentId),
                          "category_id": int(categoryId),
                          "area": int(area),
                          "bbox": bbox,
                          "iscrowd": isCrowd})
+        panoptic = {PANOPTIC_IMAGE: panoptic_seg,
+                    SEGMENT_INFO: segmInfo}
 
-    return torch.tensor(panoptic_seg), segmInfo
+    return panoptic
 
 
 def get_class_weights_from_data(loader, num_classes, cfg, task):
@@ -476,9 +492,9 @@ def compute_instance_torch(instance_image, contours_active=False,
 
     for value in torch.unique(instance_image_tensor):
         if value >= 2400:
+            xsys = torch.nonzero(instance_image_tensor == value)
+            xs, ys = xsys[:, 0], xsys[:, 1]
             if regression_active:
-                xsys = torch.nonzero(instance_image_tensor == value)
-                xs, ys = xsys[:, 0], xsys[:, 1]
                 centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()),
                                                    torch.mean(ys.float())))
                 w, h = get_instance_hw(xs, ys)
