@@ -3,7 +3,9 @@
 
 import numpy as np
 import torch
-from utils.im_utils import labels
+import copy
+
+from utils.im_utils import labels, id2label
 from utils.constants import SEGMENT_INFO, PANOPTIC_IMAGE, VOID
 
 
@@ -105,6 +107,14 @@ class panopticMetrics(object):
                 256 * 256 * color[..., 2]
         return int(color[0] + 256 * color[1] + 256 * 256 * color[2])
 
+    def get_mean_metric(self, metric):
+        metric_copy = []
+        for _id, _ in enumerate(metric):
+            label = id2label[_id]
+            if not label.ignoreInEval:
+                metric_copy.append(metric[_id])
+        return np.nanmean(metric_copy)
+
     def update(self, label_true, label_preds):
         self.get_pan_labels_preds(label_true, label_preds)
         self.get_tp_iou()
@@ -130,9 +140,9 @@ class panopticMetrics(object):
         rq = tp / (tp + 0.5 * fp + 0.5 * fn)
         pq = sq * rq
 
-        mean_metrics = {"Mean PQ": np.nanmean(pq),
-                        "Mean RQ": np.nanmean(sq),
-                        "Mean SQ": np.nanmean(rq)}
+        mean_metrics = {"Mean PQ": self.get_mean_metric(pq),
+                        "Mean RQ": self.get_mean_metric(sq),
+                        "Mean SQ": self.get_mean_metric(rq)}
         class_metrics = {'pq': pq,
                          'rq': rq,
                          'sq': sq}

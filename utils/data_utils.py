@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import cv2
 
 from utils.im_utils import labels, prob_labels, trainId2label, id2label, \
-    decode_segmap, inst_labels
+    decode_segmap, inst_labels, instance_trainId
 from utils.constants import TASKS, MODEL, OUTPUTS, TYPE, SEMANTIC, INSTANCE, \
     DISPARITY, PANOPTIC, ACTIVE, OUTPUTS_TO_TASK, INSTANCE_REGRESSION, \
     INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS, \
@@ -436,11 +436,10 @@ def cityscapes_semantic_weights(num_classes):
 
 
 def cityscapes_contour_weights(num_classes):
-    if num_classes == 11:
+    if num_classes == 9:
         class_weights = [1.427197976828025, 47.66104006965641,
                          50.0977099173462, 44.04363870779025,
                          50.31372660864973, 50.31163764506638,
-                         50.47265462912245, 50.471431327406826,
                          50.36620380700314, 50.32661428022733,
                          49.834611789928324]
 
@@ -488,10 +487,10 @@ def compute_instance_torch(instance_image, contours_active=False,
         w_h = torch.ones(instance_image.shape + (2,))
     if contours_active:
         contours = np.zeros(instance_image.shape)
-        contour_class_map = {i+24: i+1 for i in range(10)}
 
     for value in torch.unique(instance_image_tensor):
         if value >= 2400:
+            class_id = int(value.numpy()//1000)
             xsys = torch.nonzero(instance_image_tensor == value)
             xs, ys = xsys[:, 0], xsys[:, 1]
             if regression_active:
@@ -503,7 +502,7 @@ def compute_instance_torch(instance_image, contours_active=False,
 
             if contours_active:
                 cont_mask = np.zeros_like(instance_image)
-                contour_class = contour_class_map[int(value.numpy()//1000)]
+                contour_class = instance_trainId.get(class_id, 0)
                 cont_mask[np.where(instance_image == value)] = 255
                 cont_img = np.zeros(instance_image.shape)
                 _, thresh = cv2.threshold(cont_mask, 127, 255, 0)

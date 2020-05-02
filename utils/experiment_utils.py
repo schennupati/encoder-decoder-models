@@ -150,13 +150,11 @@ class ExperimentLoop():
             self.train_running_loss = averageMeter()
             for batch_id, data in tqdm(enumerate(self.dataloaders[TRAIN])):
                 self.train_step(data, epoch, batch_id)
-                break
             self.validation_step(epoch)
             self.train_loss_meters.reset()
             self.save_model(epoch)
             if self.stop_training(epoch):
                 self.writer.close()
-                break
 
         self.writer.close()
 
@@ -183,6 +181,8 @@ class ExperimentLoop():
         self.train_loss_meters.update(losses)
         loss.backward()
         self.optimizer.step()
+        self.batch_size = inputs.shape[0]
+        self.sample_idx = np.random.randint(0, self.batch_size, size=1)
 
         if (batch % self.print_interval == 0 or batch == self.n_batches-1):
             loss_weights = [p.data for p in self.criterion.parameters()]
@@ -201,8 +201,7 @@ class ExperimentLoop():
                                        loss.avg,
                                        epoch*self.n_batches + batch)
             self.send_predictions_to_writer(inputs, predictions, labels,
-                                            self.train_loss_meters, epoch,
-                                            save_to_disk=False)
+                                            self.train_loss_meters, epoch)
             print(loss_str)
         self.train_running_loss.reset()
 
@@ -217,6 +216,8 @@ class ExperimentLoop():
         with torch.no_grad():
             for i, data in tqdm(enumerate(self.dataloaders[VAL])):
                 inputs, targets = data
+                self.batch_size = inputs.shape[0]
+                self.sample_idx = np.random.randint(0, self.batch_size, size=1)
                 logits = self.model(inputs.to(self.device))
                 labels = get_labels(targets, self.cfg, self.device,
                                     get_postprocs=True)
@@ -247,11 +248,9 @@ class ExperimentLoop():
                                        loss.avg, epoch)
                 self.send_predictions_to_writer(inputs, predictions,
                                                 labels,
-                                                self.val_loss_meters, i,
-                                                save_to_disk=True)
+                                                self.val_loss_meters, i)
                 self.send_outputs_to_writer(outputs, labels,
-                                            self.post_proc_metrics, i,
-                                            save_to_disk=True)
+                                            self.post_proc_metrics, i)
 
         print_metrics(self.val_metrics)
         print_metrics(self.post_proc_metrics)
@@ -266,14 +265,16 @@ class ExperimentLoop():
         for task in meters.meters.keys():
             add_images_to_writer(inputs, predictions[task], labels[task],
                                  self.writer, epoch, task, state=self.mode,
-                                 save_to_disk=True)
+                                 sample_idx=self.sample_idx,
+                                 save_to_disk=save_to_disk)
 
     def send_outputs_to_writer(self, outputs, labels, metrics, epoch=1,
                                save_to_disk=False):
         for task in metrics.metrics.keys():
             add_images_to_writer(None, outputs[task], labels[task],
                                  self.writer, epoch, task, state=self.mode,
-                                 save_to_disk=True)
+                                 sample_idx=self.sample_idx,
+                                 save_to_disk=save_to_disk)
 
     def save_model(self, epoch):
         """Save model to checkpoint.

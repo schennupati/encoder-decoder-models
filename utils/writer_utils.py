@@ -53,18 +53,22 @@ def add_output_to_writer(predictions, targets, writer, epoch,
         state {str} -- [training or validation state] (default: {TRAIN})
         sample_idx {int} -- [Index of data in batch to be visualized]
          (default: {0})
-        save_to_disk {bool} -- Whether to save images to disk (default: {False})
+        save_images_to_disk {bool} -- Whether to save images to disk
+         (default: {False})
         dataformats {str} -- [Channel first of last] (default: {HWC})
     """
 
     write_task_data(predictions, writer, epoch, task,
-                    state, sample_idx, data_type=DET)
+                    state, sample_idx, data_type=DET,
+                    save_images_to_disk=save_image_to_disk)
     write_task_data(targets, writer, epoch, task,
-                    state, sample_idx, data_type=GT)
+                    state, sample_idx, data_type=GT,
+                    save_images_to_disk=save_images_to_disk)
 
 
 def write_task_data(data, writer, epoch, task=SEMANTIC,
-                    state=TRAIN, sample_idx=0, data_type=GT):
+                    state=TRAIN, sample_idx=0, data_type=GT,
+                    save_images_to_disk=False):
     """Writes task data to tf.writer
 
     Arguments:
@@ -78,12 +82,18 @@ def write_task_data(data, writer, epoch, task=SEMANTIC,
         sample_idx {int} -- [Index of data in batch to be visualized]
          (default: {0})
         data_type {str} -- [Ground truth or prediction] (default: {GT})
+        save_images_to_disk {bool} -- Whether to save images to disk
+         (default: {False})
     """
     data = get_sample(data, state, sample_idx)
     output = generate_task_visuals(data.squeeze(), task)
     name_to_writer = OUTPUT_WRITER_NAME.format(
-        state=state, data_type=DET, task=task)
+        state=state, data_type=data_type, task=task)
+    name_to_save = OUTPUT_SAVE_NAME.format(epoch=epoch, data_type=data_type,
+                                           task=task, state=state)
     add_image_to_writer(output, writer, epoch, name_to_writer)
+    if save_images_to_disk:
+        save_image_to_disk(output, name_to_save, sample_idx)
 
 
 def add_image_to_writer(img, writer, epoch, name_to_writer, dataformats=HWC):
@@ -134,7 +144,7 @@ def generate_task_visuals(data, task):
     if task == SEMANTIC:
         data = decode_segmap(data, nc=19, labels=labels)
     elif task == INSTANCE_CONTOUR:
-        data = decode_segmap(data, nc=11, labels=inst_labels)
+        data = decode_segmap(data, nc=9, labels=inst_labels)
     elif task == INSTANCE_REGRESSION:
         data = get_color_inst(data.transpose(1, 2, 0))
     elif task == INSTANCE_HEATMAP:
@@ -167,13 +177,13 @@ def save_image_to_disk(image, name, sample_idx=0,
     elif len(shape) == 2:
         image = image.unsqueeze(0)
     image = image.permute(1, 2, 0) if dataformats == CHW else image
-    image = image.numpy()
+    image = image.numpy() if torch.is_tensor(image) else image
     fname = os.path.join(path, name + PNG)
-    matplotlib.image.imsave(fname, image.astype(np.uint8))
+    matplotlib.image.imsave(fname, (image*225).astype(np.uint8))
 
 
 def add_images_to_writer(inputs, predictions, targets, writer,
-                         epoch, task=SEMANTIC, state=TRAIN,
+                         epoch, task=SEMANTIC, state=TRAIN, sample_idx=0,
                          save_to_disk=False):
     """[Adds images of inputs/outputs to tf.writer]
 
@@ -187,13 +197,12 @@ def add_images_to_writer(inputs, predictions, targets, writer,
     Keyword Arguments:
         task {str} -- [Type of task] (default: {SEMANTIC})
         state {str} -- [training or validation state] (default: {TRAIN})
+        sample_idx {int} -- [Index of data in batch to be visualized]
         save_to_disk {bool} -- Whether to save images to disk (default: {False})
     """
     if task == PANOPTIC:
         predictions = predictions[PANOPTIC_IMAGE]
         targets = targets[PANOPTIC_IMAGE]
-    batch_size = predictions.shape[0]
-    sample_idx = np.random.randint(0, batch_size, size=1)
     if inputs is not None:
         add_input_to_writer(inputs, writer, epoch, state, sample_idx,
                             save_to_disk, dataformats=CHW)
