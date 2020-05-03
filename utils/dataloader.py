@@ -41,8 +41,9 @@ def get_dataloaders(cfg):
         params = cfg['params'][split]
         dataset = get_dataset(cfg['data'], split,
                               target_type=target_type, transforms=transforms)
-        data_loaders[split] = torch.utils.data.DataLoader(dataset,
-                                                          batch_size=params['batch_size'],
-                                                          shuffle=params['shuffle'],
-                                                          num_workers=params['n_workers'])
+        data_loaders[split] = \
+            torch.utils.data.DataLoader(dataset,
+                                        batch_size=params['batch_size'],
+                                        shuffle=params['shuffle'],
+                                        num_workers=params['n_workers'])
     return data_loaders

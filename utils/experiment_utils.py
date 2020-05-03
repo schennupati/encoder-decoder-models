@@ -1,5 +1,5 @@
 """Helper functions for train/validation loop."""
-import pdb
+import logging
 import io
 import torch
 import tensorflow as tf
@@ -11,12 +11,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import scipy.misc
+from time import time
 
 from tqdm import tqdm
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
 from texttable import Texttable
+from copy import deepcopy
 
 
 from utils.encoder_decoder import get_encoder_decoder
@@ -36,7 +38,7 @@ from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     CRITERION_STATE, EPOCH, EPOCH_STR, OUTPUTS, OPTIMIZER, LOSS_STR, \
     TASK_LOSS, TRAIN_STR, VAL_STR, VAL_LOSS_STR, METRICS_STR, PATIENCE_STR, \
     EARLY_STOP_STR, TASK_STR, SEMANTIC, INSTANCE_PROBS, INSTANCE_CONTOUR, \
-    POSTPROC, POSTPROCS, PANOPTIC
+    POSTPROC, POSTPROCS, PANOPTIC, BATCH_LOG, LENGTH
 
 
 class ExperimentLoop():
@@ -135,25 +137,40 @@ class ExperimentLoop():
             self.criterion.load_state_dict(checkpoint[CRITERION_STATE])
             self.start_iter = checkpoint[EPOCH]
             self.best_loss = checkpoint[BEST_LOSS]
-            print("Loaded checkpoint '{}' from epoch {} with loss {}".format(
-                checkpoint_name, self.start_iter, self.best_loss))
+            logging.info("Loaded checkpoint {} from epoch {} with loss {}"
+                         .format(checkpoint_name, self.start_iter,
+                                 self.best_loss))
         else:
             if self.mode == TRAIN:
-                print("Begining Training from Scratch")
+                logging.info("Begining Training from Scratch")
             else:
                 raise ValueError('Cannot load checkpoint')
 
     def train(self):
         """Train a model on a entire train data for several epochs."""
         for epoch in range(self.epochs):
-            print(EPOCH_STR.format(epoch=epoch+1))
-            print(TRAIN_STR)
+            logging.info(EPOCH_STR.format(epoch=epoch+1).center(LENGTH, '='))
+            logging.info(TRAIN_STR.center(LENGTH, '='))
+            loss_weights = [p.data for p in self.criterion.parameters()]
+            logging.info('MTL Loss type: {}, Loss weights {}'.
+                         format(self.cfg[MODEL][LOSS_FN], loss_weights)
+                         .center(LENGTH, '='))
             self.n_batches = len(self.dataloaders[TRAIN])
             self.train_running_loss = averageMeter()
-            for batch_id, data in tqdm(enumerate(self.dataloaders[TRAIN])):
+            start = time()
+            for batch_id, data in enumerate(self.dataloaders[TRAIN]):
                 self.train_step(data, epoch, batch_id)
+            train_s = time() - start
+            loss_str = LOSS_STR.format(epoch=epoch+1,
+                                       loss=self.train_running_loss.avg)
+            for task, task_loss in self.train_loss_meters.meters.items():
+                loss_str += TASK_LOSS.format(task, task_loss.avg)
+            logging.info(loss_str + 'Time: {:05.3f}'.format(train_s))
             self.validation_step(epoch)
+
+            self.train_running_loss.reset()
             self.train_loss_meters.reset()
+
             self.save_model(epoch)
             if self.stop_training(epoch):
                 self.writer.close()
@@ -173,40 +190,53 @@ class ExperimentLoop():
             batch {[int]} -- [current batch number]
 
         """
-        self.optimizer.zero_grad()
 
+        self.optimizer.zero_grad()
+        start = time()
         inputs, targets = data
-        logits = self.model(inputs.to(self.device))
         labels = get_labels(targets, self.cfg, self.device)
+        loader_s = time() - start
+
+        start = time()
+        logits = self.model(inputs.to(self.device))
+        predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                      labels)
+        forward_s = time() - start
+
+        start = time()
         losses, loss = self.criterion(logits, labels)
         self.train_running_loss.update(loss)
         self.train_loss_meters.update(losses)
+        loss_s = time() - start
+
+        start = time()
         loss.backward()
         self.optimizer.step()
+        backward_s = time() - start
+
+        start = time()
         self.batch_size = inputs.shape[0]
         self.sample_idx = np.random.randint(0, self.batch_size, size=1)
-
-        if (batch % self.print_interval == 0 or batch == self.n_batches-1):
-            loss_weights = [p.data for p in self.criterion.parameters()]
-            print('\nLoss weights {}'.format(loss_weights))
-
-            self.writer.add_scalar('Loss/train', self.train_running_loss.avg,
+        self.writer.add_scalar('Loss/train', loss.data,
+                               epoch*self.n_batches + batch)
+        for task, task_loss in losses.items():
+            self.writer.add_scalar('Loss/train_{}'.format(task),
+                                   task_loss.data,
                                    epoch*self.n_batches + batch)
-            loss_str = LOSS_STR.format(epoch=epoch+1, batch=batch,
-                                       loss=self.train_running_loss.avg)
-            predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
-                                          labels)
-
-            for task, loss in self.train_loss_meters.meters.items():
-                loss_str += TASK_LOSS.format(task=task, loss=loss.avg)
-                self.writer.add_scalar('Loss/train_{}'.format(task),
-                                       loss.avg,
-                                       epoch*self.n_batches + batch)
+        if batch == 0:
             self.send_predictions_to_writer(inputs, predictions, labels,
                                             self.train_loss_meters, epoch,
                                             TRAIN)
-            print(loss_str)
-        self.train_running_loss.reset()
+        if batch % self.print_interval == 0 or batch == self.n_batches:
+            writer_s = time() - start
+            postproc_s = 0.0
+            metric_s = 0.0
+            train_s = loader_s + forward_s + backward_s + \
+                loss_s + postproc_s + writer_s + metric_s
+            logging.info(BATCH_LOG.format(epoch+1, batch, self.n_batches,
+                                          train_s, loader_s, forward_s,
+                                          backward_s, loss_s,
+                                          postproc_s, metric_s, writer_s))
 
     def validation_step(self, epoch):
         """Validate a model on a batch of data.
@@ -214,27 +244,51 @@ class ExperimentLoop():
         Arguments:
             epoch {[int]} -- [Current epoch number]
         """
-        print(VAL_STR)
+        val_start = deepcopy(time())
+
+        logging.info(VAL_STR.center(LENGTH, '='))
         running_val_loss = averageMeter()
         with torch.no_grad():
-            for i, data in tqdm(enumerate(self.dataloaders[VAL])):
+            for i, data in enumerate(self.dataloaders[VAL]):
+                start = time()
                 inputs, targets = data
                 self.batch_size = inputs.shape[0]
                 self.sample_idx = np.random.randint(0, self.batch_size, size=1)
-                logits = self.model(inputs.to(self.device))
+
                 labels = get_labels(targets, self.cfg, self.device,
                                     get_postprocs=True)
+                loader_s = time() - start
+
+                start = time()
+                logits = self.model(inputs.to(self.device))
+                predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                              labels)
+                forward_s = time() - start
+                backward_s = 0.0
+                postproc_s = 0.0
+                writer_s = 0.0
+
+                start = time()
                 val_losses, val_loss = self.criterion(logits, labels)
                 self.val_loss_meters.update(val_losses)
                 running_val_loss.update(val_loss)
-                predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
-                                              labels)
+                loss_s = time() - start
+
+                start = time()
                 self.val_metrics.update(labels, predictions)
+                metric_s = time() - start
 
                 if self.mode == VAL:
+                    start = time()
                     outputs = post_process_predictions(predictions,
                                                        self.cfg[POSTPROCS])
+                    postproc_s = time() - start
+
+                    start = time()
                     self.post_proc_metrics.update(labels, outputs)
+                    metric_s += time() - start
+
+                    start = time()
                     self.send_predictions_to_writer(inputs, predictions,
                                                     labels,
                                                     self.val_loss_meters, i,
@@ -242,17 +296,29 @@ class ExperimentLoop():
                     self.send_outputs_to_writer(outputs, labels,
                                                 self.post_proc_metrics, i, VAL,
                                                 save_to_disk=True)
+                    writer_s = time() - start
+
+                val_s = loader_s + forward_s + backward_s + \
+                    loss_s + postproc_s + writer_s + metric_s
+                logging.info(BATCH_LOG.format(epoch+1, i,
+                                              len(self.dataloaders[VAL]),
+                                              val_s, loader_s, forward_s,
+                                              backward_s, loss_s,
+                                              postproc_s, metric_s, writer_s))
         if self.mode != VAL:
-            print(VAL_LOSS_STR.format(epoch=epoch + 1,
-                                      loss=running_val_loss.avg))
+            start = time()
+            loss_str = VAL_LOSS_STR.format(epoch=epoch + 1,
+                                           loss=running_val_loss.avg)
             self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
             for task, loss in self.val_loss_meters.meters.items():
-                print(TASK_LOSS.format(task=task, loss=loss.avg))
+                loss_str += TASK_LOSS.format(task, loss.avg)
                 self.writer.add_scalar('Loss/Validation_{}'.format(task),
                                        loss.avg, epoch)
                 self.send_predictions_to_writer(inputs, predictions,
                                                 labels, self.val_loss_meters,
-                                                i, VAL)
+                                                epoch, VAL)
+            writer_s = time() - start
+            logging.info(loss_str + 'Time: {:05.3f}'.format(time()-val_start))
 
         print_metrics(self.val_metrics)
         if self.mode == VAL:
@@ -298,10 +364,11 @@ class ExperimentLoop():
             deleted_old = delete_old_checkpoint(save_path)
             model_name = MODEL_NAME.format(time_stamp=time_stamp,
                                            best_loss=self.best_loss)
-            print("Saving checkpoint {} at epoch {}"
-                  .format(model_name, epoch+1))
+
+            logging.info("Saving checkpoint {} at epoch {}"
+                         .format(model_name, epoch+1).center(LENGTH, '='))
             if deleted_old:
-                print('Deleted old checkpoints')
+                logging.info('Deleted old checkpoints'.center(LENGTH, '='))
                 self.plateau_count = 0
             else:
                 self.plateau_count += 1
@@ -318,7 +385,7 @@ class ExperimentLoop():
         if self.plateau_count == self.patience and self.early_stop:
             early_stop_str = EARLY_STOP_STR.format(epochs=epoch+1)
             patience_str = PATIENCE_STR.format(patience=self.plateau_count)
-            print(early_stop_str+patience_str)
+            logging.info((early_stop_str+patience_str).center(LENGTH, '='))
         return True
 
 
@@ -530,7 +597,7 @@ def print_metrics(metrics):
     Arguments:
         metrics {dict} -- [metrics to be printed]
     """
-    print(METRICS_STR)
+    logging.info(METRICS_STR.center(LENGTH, '='))
     for task in metrics.metrics.keys():
         if metrics.metrics[task] is not None:
             score, class_iou = metrics.metrics[task].get_scores()

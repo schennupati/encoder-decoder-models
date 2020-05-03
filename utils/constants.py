@@ -47,16 +47,17 @@ OPTIMIZER = 'optimizer'
 RESULTS_DIR = os.path.join(os.path.expanduser('~'), 'results')
 PLOTS_DIR = os.path.join(RESULTS_DIR, 'plots')
 EXPERIMENT_NAME = '{encoder_name}-{decoder_name}-{imsize}'
-LOSS_STR = "epoch: {epoch} batch: {batch} loss: {loss}"
-TASK_LOSS = " {task}_loss: {loss}"
-EPOCH_STR = '\n*********** Epoch {epoch} ***********'
-TRAIN_STR = '************* Training ***********'
-VAL_STR = '\n************ Validation **********'
-METRICS_STR = '\n************* Metrics ************'
-TASK_STR = '*********** {task} **********'
-VAL_LOSS_STR = "\nepoch: {epoch} validation_loss: {loss}"
+LOSS_STR = "Epoch-{epoch}: Loss: {loss} "
+TASK_LOSS = "{}_loss: {} "
+EPOCH_STR = 'Epoch {epoch}'
+TRAIN_STR = 'Training'
+VAL_STR = 'Validation'
+METRICS_STR = 'Metrics'
+TASK_STR = '{task}'
+VAL_LOSS_STR = "Epoch: {epoch} Validation_loss: {loss}"
 PATIENCE_STR = 'Patience of {patience} epochs reached.'
 EARLY_STOP_STR = 'Early Stopping after {epoch} epochs: '
+BATCH_LOG = """Epoch-{}, Batch-{}/{}: Total: {:05.3f}, Loader: {:05.3f}, Forward: {:05.3f}, Backward: {:05.3f}, Loss: {:05.3f}, PostProc: {:05.3f}, Metrics: {:05.3f}, Writer: {:05.3f}"""
 
 
 PNG = '.png'
@@ -108,6 +109,7 @@ START_ITER = 0
 PLATEAU_COUNT = 0
 VOID = 255
 STATE = None
+LENGTH = 150
 
 
 GPU_STR = 'cuda:{gpu_id}'

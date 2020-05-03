@@ -129,7 +129,7 @@ params:
   n_workers: &n_workers 8
   multigpu: True
   gpu_id: 1
-  print_interval: 50
+  print_interval: 10
   resume: True
   early_stop: True
   patience: 25
@@ -144,6 +144,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 16
+    batch_size: 20
     shuffle: True
     n_workers: *n_workers

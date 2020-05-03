@@ -1,5 +1,6 @@
 """Main script."""
 import argparse
+import logging
 
 from utils.data_utils import get_cfg
 from utils.experiment_utils import ExperimentLoop
@@ -28,7 +29,16 @@ if __name__ == "__main__":
     parser.add_argument("--mode", nargs="?", choices=['train', 'val'],
                         type=str, default='train',
                         help="train/val mode")
+    parser.add_argument("--debug", choices=['True', 'False'], type=str,
+                        default=False, help='Debug Mode toggle on/off.')
     args = parser.parse_args()
+    if args.debug:
+        logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s',
+                            level=logging.DEBUG)
+    else:
+        logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s',
+                            level=logging.INFO)
+
     cfg = get_cfg(args.config)
     mode = args.mode
     main(cfg, mode)

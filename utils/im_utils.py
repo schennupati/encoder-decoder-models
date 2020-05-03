@@ -99,7 +99,7 @@ labels = [
 
 inst_labels = [
     #       name                    id    trainId   category            catId     hasInstances   ignoreInEval   color
-    Label('unlabeled', 0,       0, 'void', 0, False, True, (0,  0,  0)),
+    Label('unlabeled', 0,       0, 'void', 0, False, True, (255, 255, 255)),
     Label('person', 24,       1, 'human', 6, True, False, (220, 20, 60)),
     Label('rider', 25,       2, 'human', 6, True, False, (255,  1,  1)),
     Label('car', 26,       3, 'vehicle', 7, True, False, (1,  1, 142)),
