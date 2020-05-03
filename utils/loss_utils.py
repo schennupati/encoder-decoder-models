@@ -11,12 +11,10 @@ import torch.nn as nn
 import pdb
 # TODO:Implement MTL loss combinations
 from utils.loss import cross_entropy2d, huber_loss, mae_loss, mse_loss, \
-    weighted_binary_cross_entropy, weighted_multiclass_cross_entropy, \
-    flatten_data
+    weighted_binary_cross_entropy, flatten_data
 loss_map = {
     'cross_entropy2d': (cross_entropy2d),
     'weighted_binary_cross_entropy': (weighted_binary_cross_entropy),
-    'weighted_multiclass_cross_entropy': (weighted_multiclass_cross_entropy),
     'huber_loss': (huber_loss),
     'mae_loss': (mae_loss),
     'mse_loss': (mse_loss)}
@@ -91,8 +89,6 @@ class MultiTaskLoss(nn.Module):
             loss = cross_entropy2d(prediction, target.long(), weight=weight)
         elif loss_fn == 'weighted_binary_cross_entropy':
             loss = weighted_binary_cross_entropy(prediction, target.long())
-        elif loss_fn == 'weighted_multiclass_cross_entropy':
-            loss = weighted_multiclass_cross_entropy(prediction, target.long())
         elif loss_fn == 'l1':
             non_zeros = torch.nonzero(target).size(0)
             if prediction.size() != target.size():

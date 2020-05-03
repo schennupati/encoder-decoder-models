@@ -51,7 +51,10 @@ def weighted_binary_cross_entropy(input, target):
         loss = F.binary_cross_entropy_with_logits(prediction, label, mask)
         mean_loss += loss
 
-    return mean_loss
+    #nmsloss = StealNMSLoss()
+    #ln = nmsloss.__call__(target_onehot, input_soft)
+
+    return mean_loss  # +ln
 
 
 def get_weight_mask(target):
@@ -72,22 +75,7 @@ def make_one_hot(labels, num_classes=10):
     return one_hot.to(labels.get_device())
 
 
-def BCELoss_ClassWeights(input, target, class_weights, reversed=False):
-    # input (n, d)
-    # target (n, d)
-    # class_weights (1, d)
-    input = torch.clamp(input, min=1e-7, max=1-1e-7)
-    bce = class_weights[0]*target * \
-        torch.log(input) + class_weights[1]*(1 - target) * torch.log(1 - input)
-    final_reduced_over_batch = -bce.sum()
-    return final_reduced_over_batch
-
-
-def dice_loss(input_soft: torch.Tensor, target: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Function that computes Sørensen-Dice Coefficient loss.
-
-    See :class:`~kornia.losses.DiceLoss` for details.
-    """
+def dice_loss(input_soft, target, eps=1e-8):
     if not torch.is_tensor(input_soft):
         raise TypeError("Input type is not a torch.Tensor. Got {}"
                         .format(type(input_soft)))
@@ -112,54 +100,6 @@ def dice_loss(input_soft: torch.Tensor, target: torch.Tensor, eps: float = 1e-8)
 
     dice_score = 2. * intersection/(cardinality + eps)
     return torch.mean(-dice_score + 1.)
-
-
-def weighted_multiclass_cross_entropy(input, target, weight=None, weights=None):
-    if len(input.size()) == 4:
-        n, c, h, w = input.size()
-    else:
-        c, h, w = input.size()
-    if weight is None:
-        weight = [1 for i in range(c)]
-    input_soft = torch.sigmoid(input)
-    target_onehot = make_one_hot(target)
-    lc = weighted_multi_class_binary_cross_entropy(
-        input_soft, target_onehot, weights=weights)
-    # ld = dice_loss(input_soft, target_onehot)
-    # l2 = F.l1_loss(input_soft, target_onehot, reduction='mean')
-
-    return lc  # + ld + l2
-
-
-def weighted_multiclass_cross_entropy_with_nms(input, target, weight=None, weights=None):
-    nmsloss = StealNMSLoss()
-    if len(input.size()) == 4:
-        n, c, h, w = input.size()
-    else:
-        c, h, w = input.size()
-    if weight is None:
-        weight = [1 for i in range(c)]
-    input_soft = torch.sigmoid(input)
-    target_onehot = make_one_hot(target)
-    lc = weighted_multi_class_binary_cross_entropy(
-        input_soft, target_onehot, weights=weights)
-    ln = nmsloss.__call__(target_onehot, input_soft)
-
-    return lc + ln
-
-
-def weighted_multi_class_binary_cross_entropy(input, target, weights):
-    bce_loss = 0.0
-    n, c, h, w = input.shape
-    assert input.shape == target.shape
-    # import pdb; pdb.set_trace()
-
-    for i in range(c):
-        input_, target_ = input[:, i, ...].view(
-            n, h*w), target[:, i, ...].view(n, h*w)
-        bce_loss += BCELoss_ClassWeights(input_, target_,
-                                         class_weights=weights, reversed=reversed)
-    return bce_loss
 
 
 def huber_loss(input, target, weight=None, size_average=True):
