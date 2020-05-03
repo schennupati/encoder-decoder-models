@@ -103,8 +103,8 @@ inst_labels = [
     Label('person', 24,       1, 'human', 6, True, False, (220, 20, 60)),
     Label('rider', 25,       2, 'human', 6, True, False, (255,  1,  1)),
     Label('car', 26,       3, 'vehicle', 7, True, False, (1,  1, 142)),
-    Label('truck', 27,       4, 'vehicle', 7, True, False, (250, 170, 160)),
-    Label('bus', 28,       5, 'vehicle', 7, True, False, (102, 102, 156)),
+    Label('truck', 27,       4, 'vehicle', 7, True, False, (0,  0, 70)),
+    Label('bus', 28,       5, 'vehicle', 7, True, False, (0, 60, 100)),
     Label('train', 31,       6, 'vehicle', 7, True, False, (1, 80, 100)),
     Label('motorcycle', 32,       7, 'vehicle', 7, True, False, (1,  1, 230)),
     Label('bicycle', 33,      8, 'vehicle', 7, True, False, (119, 11, 32))

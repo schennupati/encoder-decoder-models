@@ -15,7 +15,7 @@ model:
     instance_contour:
       active: &contour_active True
       out_channels: 9
-      loss: cross_entropy2d
+      loss: weighted_binary_cross_entropy
       loss_weight: 1.0
       metric: classification_metrics # TODO: panoptic_metrics
       postproc: argmax

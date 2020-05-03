@@ -5,25 +5,21 @@ Created on Tue Jul 30 13:40:49 2019
 
 @author: sumche
 """
+from utils.data_utils import get_weights
 import torch
 import torch.nn as nn
 import pdb
 # TODO:Implement MTL loss combinations
-from utils.loss import (cross_entropy2d, bootstrapped_cross_entropy2d,
-                        multi_scale_cross_entropy2d, huber_loss, mae_loss,
-                        mse_loss, instance_loss, weighted_binary_cross_entropy)
-from utils.data_utils import get_weights
-
+from utils.loss import cross_entropy2d, huber_loss, mae_loss, mse_loss, \
+    weighted_binary_cross_entropy, weighted_multiclass_cross_entropy, \
+    flatten_data
 loss_map = {
     'cross_entropy2d': (cross_entropy2d),
     'weighted_binary_cross_entropy': (weighted_binary_cross_entropy),
-    'multi_scale_cross_entropy2d': (multi_scale_cross_entropy2d),
-    'bootstrapped_cross_entropy2d': (bootstrapped_cross_entropy2d),
+    'weighted_multiclass_cross_entropy': (weighted_multiclass_cross_entropy),
     'huber_loss': (huber_loss),
     'mae_loss': (mae_loss),
-    'mse_loss': (mse_loss),
-    'instance_loss': (instance_loss)
-}
+    'mse_loss': (mse_loss)}
 
 
 def get_loss_fn(loss_type):
@@ -80,7 +76,7 @@ class MultiTaskLoss(nn.Module):
 
     def forward(self, predictions, targets):
         active_tasks = self.get_active_tasks()
-        #sigma = self.get_sigma(active_tasks)
+        # sigma = self.get_sigma(active_tasks)
         for task in active_tasks:
             prediction = predictions[task]
             target = targets[task]
@@ -98,9 +94,9 @@ class MultiTaskLoss(nn.Module):
         if loss_fn == 'cross_entropy2d':
             loss = cross_entropy2d(prediction, target.long(), weight=weight)
         elif loss_fn == 'weighted_binary_cross_entropy':
-            weights = self.get_weights(target)
-            loss = weighted_binary_cross_entropy(
-                prediction, target.long(), weights=weights)
+            loss = weighted_binary_cross_entropy(prediction, target.long())
+        elif loss_fn == 'weighted_multiclass_cross_entropy':
+            loss = weighted_multiclass_cross_entropy(prediction, target.long())
         elif loss_fn == 'l1':
             non_zeros = torch.nonzero(target).size(0)
             if prediction.size() != target.size():
@@ -136,13 +132,14 @@ class MultiTaskLoss(nn.Module):
 
         elif self.loss_type == 'uncertainty':
             for i, task in enumerate(self.losses.keys()):
-                if self.cfg[task]['loss'] == 'cross_entropy2d' or self.cfg[task]['loss'] == 'weighted_binary_cross_entropy':
-                    loss += torch.exp(-self.sigma[i]) * \
-                        self.losses[task] + 0.5*self.sigma[i]
-                elif self.cfg[task]['loss'] == 'l1' or self.cfg[task]['loss'] == 'l2':
-                    loss += 0.5 * \
-                        (torch.exp(-self.sigma[i]) *
-                         self.losses[task] + self.sigma[i])
+                if self.cfg[task]['loss'] \
+                    in ['cross_entropy2d', 'weighted_binary_cross_entropy',
+                        'weighted_multiclass_cross_entropy']:
+                    loss += torch.exp(-self.sigma[i]) * self.losses[task] + \
+                        0.5*self.sigma[i]
+                elif self.cfg[task]['loss'] in ['l1', 'l2']:
+                    loss += 0.5 * torch.exp(-self.sigma[i]) * \
+                        self.losses[task] + self.sigma[i]
         return loss
 
 

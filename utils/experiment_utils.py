@@ -88,6 +88,8 @@ class ExperimentLoop():
         self.resume_training = params[RESUME]
         self.exp_dir, _, _ = get_exp_dir(cfg)
         self.plateau_count = 0
+        self.start_iter = 0
+        self.best_loss = MILLION
 
     def get_criterion(self):
         """Get criterion for the current experiment."""
@@ -201,7 +203,8 @@ class ExperimentLoop():
                                        loss.avg,
                                        epoch*self.n_batches + batch)
             self.send_predictions_to_writer(inputs, predictions, labels,
-                                            self.train_loss_meters, epoch)
+                                            self.train_loss_meters, epoch,
+                                            TRAIN)
             print(loss_str)
         self.train_running_loss.reset()
 
@@ -235,9 +238,9 @@ class ExperimentLoop():
                     self.send_predictions_to_writer(inputs, predictions,
                                                     labels,
                                                     self.val_loss_meters, i,
-                                                    save_to_disk=True)
+                                                    VAL, save_to_disk=True)
                     self.send_outputs_to_writer(outputs, labels,
-                                                self.post_proc_metrics, i,
+                                                self.post_proc_metrics, i, VAL,
                                                 save_to_disk=True)
         if self.mode != VAL:
             print(VAL_LOSS_STR.format(epoch=epoch + 1,
@@ -248,10 +251,8 @@ class ExperimentLoop():
                 self.writer.add_scalar('Loss/Validation_{}'.format(task),
                                        loss.avg, epoch)
                 self.send_predictions_to_writer(inputs, predictions,
-                                                labels,
-                                                self.val_loss_meters, i)
-                self.send_outputs_to_writer(outputs, labels,
-                                            self.post_proc_metrics, i)
+                                                labels, self.val_loss_meters,
+                                                i, VAL)
 
         print_metrics(self.val_metrics)
         if self.mode == VAL:
@@ -263,18 +264,18 @@ class ExperimentLoop():
         running_val_loss.reset()
 
     def send_predictions_to_writer(self, inputs, predictions, labels, meters,
-                                   epoch=1, save_to_disk=False):
+                                   epoch=1, state=VAL, save_to_disk=False):
         for task in meters.meters.keys():
             add_images_to_writer(inputs, predictions[task], labels[task],
-                                 self.writer, epoch, task, state=self.mode,
+                                 self.writer, epoch, task, state=state,
                                  sample_idx=self.sample_idx,
                                  save_to_disk=save_to_disk)
 
     def send_outputs_to_writer(self, outputs, labels, metrics, epoch=1,
-                               save_to_disk=False):
+                               state=VAL, save_to_disk=False):
         for task in metrics.metrics.keys():
             add_images_to_writer(None, outputs[task], labels[task],
-                                 self.writer, epoch, task, state=self.mode,
+                                 self.writer, epoch, task, state=state,
                                  sample_idx=self.sample_idx,
                                  save_to_disk=save_to_disk)
 
@@ -536,7 +537,7 @@ def print_metrics(metrics):
             if isinstance(score, dict):
                 header = score.keys()
                 t = PrettyTable(header)
-                t.title(task)
+                t.title = task
                 t.add_row(['{:05.3f}'.format(score[k] * 100)
                            for k in score.keys()])
                 print(t)
