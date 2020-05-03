@@ -52,7 +52,8 @@ class ConvBNReLU(nn.Sequential):
         padding = self._get_padding(kernel_size, stride)
         super(ConvBNReLU, self).__init__(
             nn.ZeroPad2d(padding),
-            nn.Conv2d(in_planes, out_planes, kernel_size, stride, padding=0, groups=groups, bias=False),
+            nn.Conv2d(in_planes, out_planes, kernel_size, stride,
+                      padding=0, groups=groups, bias=False),
             nn.BatchNorm2d(out_planes),
             Swish(),
         )
@@ -104,7 +105,8 @@ class MBConvBlock(nn.Module):
 
         layers += [
             # dw
-            ConvBNReLU(hidden_dim, hidden_dim, kernel_size, stride=stride, groups=hidden_dim),
+            ConvBNReLU(hidden_dim, hidden_dim, kernel_size,
+                       stride=stride, groups=hidden_dim),
             # se
             SqueezeExcitation(hidden_dim, reduced_dim),
             # pw-linear
@@ -153,8 +155,14 @@ def _round_repeats(repeats, depth_mult):
 @mlconfig.register
 class EfficientNet(nn.Module):
 
-    def __init__(self, width_mult=1.0, depth_mult=1.0, dropout_rate=0.2, num_classes=1000):
+    def __init__(self, multiscale=False, width_mult=1.0, depth_mult=1.0,
+                 dropout_rate=0.2, num_classes=1000):
         super(EfficientNet, self).__init__()
+        self.multiscale = multiscale
+        self.width_mult = width_mult
+        self.depth_mult = depth_mult
+        self.dropout_rate = dropout_rate
+        self.in_planes_map = {}
 
         # yapf: disable
         settings = [
@@ -169,26 +177,43 @@ class EfficientNet(nn.Module):
         ]
         # yapf: enable
 
+        # Layer1 outputs downsized scale 2
         out_channels = _round_filters(32, width_mult)
         features = [ConvBNReLU(3, out_channels, 3, stride=2)]
+        self.layer1 = nn.Sequential(*features)
+        self.in_channels = out_channels
+        self.in_planes_map[0] = self.in_channels
 
-        in_channels = out_channels
-        for t, c, n, s, k in settings:
-            out_channels = _round_filters(c, width_mult)
-            repeats = _round_repeats(n, depth_mult)
-            for i in range(repeats):
-                stride = s if i == 0 else 1
-                features += [MBConvBlock(in_channels, out_channels, expand_ratio=t, stride=stride, kernel_size=k)]
-                in_channels = out_channels
+        # Layer 2 outputs downsized scale 4
+        features = self._make_layer(settings[0])
+        features += self._make_layer(settings[1])
+        self.layer2 = nn.Sequential(*features)
+        self.in_planes_map[1] = self.in_channels
 
+        # Layer 3 outputs downsized scale 8
+        features = self._make_layer(settings[2])
+        self.layer3 = nn.Sequential(*features)
+        self.in_planes_map[2] = self.in_channels
+
+        # Layer 4 outputs downsized scale 16
+        features = self._make_layer(settings[3])
+        self.layer4 = nn.Sequential(*features)
+        self.in_planes_map[3] = self.in_channels
+
+        # Layer 5 outputs downsized scale 32
+        features = self._make_layer(settings[4])
+        features += self._make_layer(settings[5])
+        self.layer5 = nn.Sequential(*features)
+        self.in_planes_map[4] = self.in_channels
+
+        # Layer 6 continues to maintain scale 32
+        features = self._make_layer(settings[6])
         last_channels = _round_filters(1280, width_mult)
-        features += [ConvBNReLU(in_channels, last_channels, 1)]
+        features += [ConvBNReLU(self.in_channels, last_channels, 1)]
+        self.last_layer = nn.Sequential(*features)
 
-        self.features = nn.Sequential(*features)
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout_rate),
-            nn.Linear(last_channels, num_classes),
-        )
+        self.classifier = nn.Sequential(nn.Dropout(dropout_rate),
+                                        nn.Linear(last_channels, num_classes))
 
         # weight initialization
         for m in self.modules():
@@ -206,18 +231,46 @@ class EfficientNet(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
+    def _make_layer(self, setting):
+        t, c, n, s, k = setting
+        features = []
+        out_channels = _round_filters(c, self.width_mult)
+        repeats = _round_repeats(n, self.depth_mult)
+        for i in range(repeats):
+            stride = s if i == 0 else 1
+            features += [MBConvBlock(self.in_channels, out_channels,
+                                     expand_ratio=t, stride=stride,
+                                     kernel_size=k)]
+            self.in_channels = out_channels
+
+        return features
+
     def forward(self, x):
-        x = self.features(x)
-        x = x.mean([2, 3])
-        x = self.classifier(x)
-        return x
+        down_sampled_2 = self.layer1(x)
+        down_sampled_4 = self.layer2(down_sampled_2)
+        down_sampled_8 = self.layer3(down_sampled_4)
+        down_sampled_16 = self.layer4(down_sampled_8)
+        down_sampled_32 = self.layer5(down_sampled_16)
+        out = down_sampled_32.mean([2, 3])
+        out = self.classifier(out)
+        intermed = [down_sampled_2,
+                    down_sampled_4,
+                    down_sampled_8,
+                    down_sampled_16,
+                    down_sampled_32]
+        if self.multiscale:
+            return out, intermed
+        else:
+            return out
 
 
-def _efficientnet(arch, pretrained, progress, **kwargs):
+def _efficientnet(arch, pretrained, progress, multiscale=False, **kwargs):
     width_mult, depth_mult, _, dropout_rate = params[arch]
-    model = EfficientNet(width_mult, depth_mult, dropout_rate, **kwargs)
+    model = EfficientNet(multiscale, width_mult, depth_mult,
+                         dropout_rate, **kwargs)
     if pretrained:
-        state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
+        state_dict = load_state_dict_from_url(
+            model_urls[arch], progress=progress)
 
         if 'num_classes' in kwargs and kwargs['num_classes'] != 1000:
             del state_dict['classifier.1.weight']
@@ -228,40 +281,56 @@ def _efficientnet(arch, pretrained, progress, **kwargs):
 
 
 @mlconfig.register
-def efficientnet_b0(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b0', pretrained, progress, **kwargs)
+def efficientnet_b0(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b0', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b1(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b1', pretrained, progress, **kwargs)
+def efficientnet_b1(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b1', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b2(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b2', pretrained, progress, **kwargs)
+def efficientnet_b2(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b2', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b3(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b3', pretrained, progress, **kwargs)
+def efficientnet_b3(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b3', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b4(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b4', pretrained, progress, **kwargs)
+def efficientnet_b4(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b4', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b5(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b5', pretrained, progress, **kwargs)
+def efficientnet_b5(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b5', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b6(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b6', pretrained, progress, **kwargs)
+def efficientnet_b6(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b6', pretrained,
+                         progress, multiscale, **kwargs)
 
 
 @mlconfig.register
-def efficientnet_b7(pretrained=False, progress=True, **kwargs):
-    return _efficientnet('efficientnet_b7', pretrained, progress, **kwargs)
+def efficientnet_b7(pretrained=False, progress=True,
+                    multiscale=False, **kwargs):
+    return _efficientnet('efficientnet_b7', pretrained,
+                         progress, multiscale, **kwargs)

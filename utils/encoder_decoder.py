@@ -5,58 +5,12 @@ Created on Thu Jul 25 20:00:48 2019
 
 @author: sumche
 """
-from collections import OrderedDict
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torchvision.models._utils import IntermediateLayerGetter
-from torchvision.models import resnet
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torch.autograd import Variable
 
-from models.fcn import FCN
-from models.fpn import FPN
-from models.vgg import VGGNet
-from models.efficientnet import efficientnet_b0, efficientnet_b1
-from utils.model_uitls import get_activation
-
-import pdb
-__all__ = ['FCN']
-
-inplanes_map = {
-    'resnet':
-    {
-        'resnet18': [512, 256, 128, 64], 'resnet34': [512, 256, 128, 64],
-        'resnet50': [2048, 1024, 512, 256], 'resnet101': [2048, 1024, 512, 256],
-        'resnet152': [2048, 1024, 512], 'resnext50_32x4d': [2048, 1024, 512],
-        'resnext101_32x8d': [2048, 1024, 512], 'wide_resnet50_2': [2048, 1024, 512],
-        'wide_resnet101_2': [2048, 1024, 512]
-    },
-    'vgg':
-    {
-        'vgg16': [512, 512, 256, 128], 'vgg19': [512, 512, 256, 128]
-    },
-    'efficientnet':
-    {
-        'efficientnet_b0': [320, 112, 40, 24], 'efficientnet_b1': [320, 112, 40, 24]
-    }
-}
-
-outplanes_map = {
-    'resnet':
-    {
-        'fpn': [256, 128], 'fcn': [512, 256, 128, 64, 32]
-    },
-    'vgg':
-    {
-        'fpn': [256, 128], 'fcn': [512, 256, 128, 64, 32]
-    },
-    'efficientnet':
-    {
-        'fpn': [128, 64], 'fcn': [320, 112, 40, 40, 32]
-    }
-}
-
+from models import FCN, FPN, VGGNet, encoder_fn
 
 decoder_map = {'fcn': (FCN), 'fpn': (FPN)}
 
@@ -67,52 +21,15 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     decoder_name = cfg['model']['decoder']
     tasks = cfg['tasks']
 
-    if 'resnet' in encoder_name:
-        if encoder_name in ['resnet18', 'resnet34'] and decoder_name == 'fpn':
-            raise ValueError(
-                '{} is not supported with fpn'.format(encoder_name))
-        return_layers = {'relu': 'out_0', 'layer1': 'out_1',
-                         'layer2': 'out_2', 'layer3': 'out_3', 'layer4': 'out_final'}
-        encoder = resnet.__dict__[encoder_name](pretrained=pretrained_backbone,
-                                                replace_stride_with_dilation=[False, False, False])
-        encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
-        inplanes = inplanes_map['resnet'][encoder_name]
-        if decoder_name == 'fpn':
-            outplanes = outplanes_map['resnet'][decoder_name]
-            decoder_fn = decoder_map['fpn']
+    encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
+                                       progress=True, multiscale=True)
 
-        elif decoder_name == 'fcn':
-            outplanes = outplanes_map['resnet'][decoder_name]
-            decoder_fn = decoder_map['fcn']
+    in_planes = list(encoder.in_planes_map.values())
+    in_planes.reverse()
+    out_planes = in_planes[1:3]
 
-    elif 'vgg' in encoder_name:
-        encoder = VGGNet(model=encoder_name, requires_grad=True)
-        inplanes = inplanes_map['vgg'][encoder_name]
-        outplanes = outplanes_map['vgg'][decoder_name]
-        if decoder_name == 'fpn':
-            decoder_fn = decoder_map['fpn']
-        elif decoder_name == 'fcn':
-            decoder_fn = decoder_map['fcn']
-
-    elif 'efficientnet' in encoder_name:
-        if encoder_name == 'efficientnet_b0':
-            encoder = efficientnet_b0(pretrained=True).features
-            return_layers = {'3': 'out_1', '5': 'out_2',
-                             '11': 'out_3', '16': 'out_final'}
-        elif encoder_name == 'efficientnet_b1':
-            encoder = efficientnet_b1(pretrained=True).features
-            return_layers = {'5': 'out_1', '8': 'out_2',
-                             '16': 'out_3', '23': 'out_final'}
-        encoder = IntermediateLayerGetter(encoder, return_layers=return_layers)
-        inplanes = inplanes_map['efficientnet'][encoder_name]
-        outplanes = outplanes_map['efficientnet'][decoder_name]
-        if decoder_name == 'fpn':
-            decoder_fn = decoder_map['fpn']
-        elif decoder_name == 'fcn':
-            decoder_fn = decoder_map['fcn']
-
-    model = Encoder_Decoder(encoder, decoder_fn, cfg,
-                            in_planes=inplanes, out_planes=outplanes)
+    model = Encoder_Decoder(encoder, decoder_map[decoder_name], cfg,
+                            in_planes=in_planes, out_planes=out_planes)
     return model
 
 
@@ -120,27 +37,26 @@ def get_task_cls(in_channels, out_channels, kenrel_size=(1, 1)):
     return nn.Sequential(nn.Conv2d(in_channels, out_channels, kenrel_size))
 
 
-def get_intermediate_result(model, output):
-    encoder = model['encoder']
-    decoder = model['decoder']
-    intermediate_result = OrderedDict()
-    layers = [k for k, _ in output.items()]
-    if 'resnet' in encoder and 'fpn' in decoder:
-        layers = layers[1:]
-    else:
-        layers = layers
-    for layer in layers:
-        intermediate_result[layer] = output[layer]
-    return intermediate_result, layers
+def get_activation(activation, inplace=True):
+    if activation == 'ELU':
+        return nn.ELU(alpha=1.0, inplace=inplace)
+    elif activation == 'LeakyReLU':
+        return nn.LeakyReLU(negative_slope=0.01, inplace=inplace)
+    elif activation == 'PReLU':
+        return nn.PReLU(num_parameters=1, init=0.25)
+    elif activation == 'ReLU':
+        return nn.ReLU(inplace=inplace)
+    elif activation == 'Tanh':
+        return nn.Tanh()
 
 
-class _Encoder_Decoder(nn.Module):
+class Encoder_Decoder(nn.Module):
     def __init__(self, encoder, base_decoder_fn, cfg,
                  in_planes, out_planes):
         super().__init__()
         self.encoder = encoder
         self.class_decoder = base_decoder_fn(in_planes, out_planes)
-        self.reg_decoder = base_decoder_fn(in_planes, out_planes)
+        # self.reg_decoder = base_decoder_fn(in_planes, out_planes)
         self.task_cls = {}
         self.model = cfg['model']
         self.heads = cfg['model']['outputs']
@@ -163,11 +79,9 @@ class _Encoder_Decoder(nn.Module):
 
     def forward(self, x):
         outputs = {}
-        x = self.encoder(x)
-        intermediate_result, layers = get_intermediate_result(self.model, x)
-        class_score, class_feats = self.class_decoder(
-            intermediate_result, layers)
-        reg_score, _ = self.reg_decoder(intermediate_result, layers)
+        x, intermediate_result = self.encoder(x)
+        class_score, class_feats = self.class_decoder(intermediate_result)
+        # reg_score, _ = self.reg_decoder(intermediate_result)
         if self.heads['semantic']['active']:
             out = self.semantic(class_score)
             out = F.relu(out, inplace=True)
@@ -224,19 +138,3 @@ class _Encoder_Decoder(nn.Module):
             if torch.max(out[i, :, :, :]) != 0:
                 out_tensor[i, :, :, :] /= torch.max(out[i, :, :, :])
         return out_tensor
-
-
-class Encoder_Decoder(_Encoder_Decoder):
-    """
-    Implements a Fully-Convolutional Network for semantic segmentation.
-
-    Arguments:
-        backbone (nn.Module): the network used to compute the features for the model.
-            The backbone should return an OrderedDict[Tensor], with the key being
-            "out" for the last feature map used, and "aux" if an auxiliary classifier
-            is used.
-        classifier (nn.Module): module that takes the "out" element returned from
-            the backbone and returns a dense prediction.
-        aux_classifier (nn.Module, optional): auxiliary classifier used during training
-    """
-    pass
