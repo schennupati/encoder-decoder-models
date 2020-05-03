@@ -251,7 +251,8 @@ class EfficientNet(nn.Module):
         down_sampled_8 = self.layer3(down_sampled_4)
         down_sampled_16 = self.layer4(down_sampled_8)
         down_sampled_32 = self.layer5(down_sampled_16)
-        out = down_sampled_32.mean([2, 3])
+        out = self.last_layer(down_sampled_32)
+        out = out.mean([2, 3])
         out = self.classifier(out)
         intermed = [down_sampled_2,
                     down_sampled_4,

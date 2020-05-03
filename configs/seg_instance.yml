@@ -1,6 +1,6 @@
 model:
   arch: encoder_decoder # Shared encoder and independent decoders
-  encoder: resnet18
+  encoder: efficientnet_b0
   decoder: fpn
   pretrained_path: /home/sumche/results
   loss_fn: uncertainty # fixed, uncertainty etc
