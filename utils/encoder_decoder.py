@@ -10,7 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Variable
 
-from models import FCN, FPN, VGGNet, encoder_fn
+from models import FCN, FPN, EdgeDNN, encoder_fn
 
 decoder_map = {'fcn': (FCN), 'fpn': (FPN)}
 
@@ -26,7 +26,10 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
 
     in_planes = list(encoder.in_planes_map.values())
     in_planes.reverse()
-    out_planes = in_planes[1:3]
+    if encoder_name in ['resnet18', ['resnet34']]:
+        out_planes = in_planes[1:3]
+    else:
+        out_planes = [planes//4 for planes in in_planes[:2]]
 
     model = Encoder_Decoder(encoder, decoder_map[decoder_name], cfg,
                             in_planes=in_planes, out_planes=out_planes)
@@ -55,18 +58,18 @@ class Encoder_Decoder(nn.Module):
                  in_planes, out_planes):
         super().__init__()
         self.encoder = encoder
+        self.heads = cfg['model']['outputs']
         self.class_decoder = base_decoder_fn(in_planes, out_planes)
+
         # self.reg_decoder = base_decoder_fn(in_planes, out_planes)
         self.task_cls = {}
         self.model = cfg['model']
-        self.heads = cfg['model']['outputs']
         if self.heads['semantic']['active']:
             self.semantic = get_task_cls(out_planes[-1],
                                          self.heads['semantic']['out_channels'])
         if self.heads['instance_contour']['active']:
             num_classes = self.heads['instance_contour']['out_channels']
-            self.ce_fusion = nn.Conv2d(4*num_classes, num_classes, groups=num_classes, kernel_size=1, stride=1, padding=0,
-                                       bias=True)
+            self.edge_decoder = EdgeDNN(in_planes, num_classes)
         if self.heads['instance_regression']['active']:
             self.instance_regression = get_task_cls(out_planes[-1],
                                                     self.heads['instance_regression']['out_channels'])
@@ -80,7 +83,8 @@ class Encoder_Decoder(nn.Module):
     def forward(self, x):
         outputs = {}
         x, intermediate_result = self.encoder(x)
-        class_score, class_feats = self.class_decoder(intermediate_result)
+        class_score, _ = self.class_decoder(intermediate_result)
+
         # reg_score, _ = self.reg_decoder(intermediate_result)
         if self.heads['semantic']['active']:
             out = self.semantic(class_score)
@@ -89,13 +93,8 @@ class Encoder_Decoder(nn.Module):
                                 mode='bilinear', align_corners=True)
             outputs['semantic'] = out
         if self.heads['instance_contour']['active']:
-            num_classes = self.heads['instance_contour']['out_channels']
-            out = self._sliced_concat(
-                class_feats[0], class_feats[1], class_feats[2], class_feats[3], num_classes)
-            out = self.ce_fusion(out)
-            out = F.interpolate(out, scale_factor=4,
-                                mode='bilinear', align_corners=True)
-            outputs['instance_contour'] = out
+            outputs['instance_contour'] = self.edge_decoder(
+                intermediate_result)
         if self.heads['instance_regression']['active']:
             out = self.instance_regression(reg_score)
             out = F.interpolate(out, scale_factor=4,

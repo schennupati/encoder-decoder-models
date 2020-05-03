@@ -43,19 +43,24 @@ def cross_entropy2d(input, target, weight=None, size_average=True):
 def weighted_binary_cross_entropy(input, target):
     input, target = flatten_data(input, target)
     n_classes = input.shape[1]
-    mask = (target != 0).float()
-    num_positive = torch.sum(mask).float()
-    num_negative = mask.numel() - num_positive
-    mask[mask != 0] = num_negative / mask.numel()
-    mask[mask == 0] = num_positive / mask.numel()
     mean_loss = 0.0
     for class_id in range(n_classes):
         label = (target == class_id).float()
+        mask = get_weight_mask(label)
         prediction = input[:, class_id, ...]
         loss = F.binary_cross_entropy_with_logits(prediction, label, mask)
         mean_loss += loss
 
     return mean_loss
+
+
+def get_weight_mask(target):
+    mask = (target != 0).float()
+    num_positive = torch.sum(mask).float()
+    num_negative = mask.numel() - num_positive
+    mask[mask != 0] = num_negative / mask.numel()
+    mask[mask == 0] = num_positive / mask.numel()
+    return mask
 
 
 def make_one_hot(labels, num_classes=10):

@@ -133,7 +133,11 @@ class ResNet(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
-        self.in_planes_map = {0: 64, 1: 64, 2: 128, 3: 256, 4: 512}
+        self.in_planes_map = {0: 64,
+                              1: 64 * block.expansion,
+                              2: 128 * block.expansion,
+                              3: 256 * block.expansion,
+                              4: 512 * block.expansion}
 
         self.inplanes = 64
         self.dilation = 1
@@ -210,10 +214,10 @@ class ResNet(nn.Module):
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
-        down_sampled_2 = self.maxpool(x)
+        down_sampled_2 = self.relu(x)
+        x = self.maxpool(down_sampled_2)
 
-        down_sampled_4 = self.layer1(down_sampled_2)
+        down_sampled_4 = self.layer1(x)
         down_sampled_8 = self.layer2(down_sampled_4)
         down_sampled_16 = self.layer3(down_sampled_8)
         down_sampled_32 = self.layer4(down_sampled_16)

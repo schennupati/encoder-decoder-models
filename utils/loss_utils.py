@@ -70,10 +70,6 @@ class MultiTaskLoss(nn.Module):
                 active_tasks.append(task)
         return active_tasks
 
-    def get_sigma(self, active_tasks):
-        n = len(active_tasks)
-        return nn.Parameter(torch.ones(n))
-
     def forward(self, predictions, targets):
         active_tasks = self.get_active_tasks()
         # sigma = self.get_sigma(active_tasks)
@@ -127,8 +123,12 @@ class MultiTaskLoss(nn.Module):
     def compute_total_loss(self):
         loss = 0.0
         if self.loss_type == 'fixed':
+            sigmas = []
             for task in self.losses.keys():
-                loss += self.losses[task]*self.cfg[task]['loss_weight']
+                sigma = self.cfg[task]['loss_weight']
+                loss += self.losses[task] * sigma
+                sigmas.append(sigma)
+            self.sigma = nn.Parameter(torch.tensor(sigmas))
 
         elif self.loss_type == 'uncertainty':
             for i, task in enumerate(self.losses.keys()):

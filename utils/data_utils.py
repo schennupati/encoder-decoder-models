@@ -490,9 +490,10 @@ def compute_instance_torch(instance_image, contours_active=False,
     for value in torch.unique(instance_image_tensor):
         if value >= 2400:
             class_id = int(value.numpy()//1000)
-            xsys = torch.nonzero(instance_image_tensor == value)
-            xs, ys = xsys[:, 0], xsys[:, 1]
+
             if regression_active:
+                xsys = torch.nonzero(instance_image_tensor == value)
+                xs, ys = xsys[:, 0], xsys[:, 1]
                 centroids_t[xs, ys] = torch.stack((torch.mean(xs.float()),
                                                    torch.mean(ys.float())))
                 w, h = get_instance_hw(xs, ys)
@@ -509,15 +510,6 @@ def compute_instance_torch(instance_image, contours_active=False,
                     np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
                 cont_img = cv2.drawContours(cont_img, cnts, -1, 1, 1)
                 contours[np.where(cont_img == 1.0)] = contour_class
-                cont = np.array([xs.numpy(), ys.numpy()])
-                for x in np.unique(cont[0, :]):
-                    idx = np.where(cont[0, :] == x)
-                    contours[x, np.min(cont[1, idx])] = contour_class
-                    contours[x, np.max(cont[1, idx])] = contour_class
-                for y in np.unique(cont[1, :]):
-                    idx = np.where(cont[1, :] == y)
-                    contours[np.min(cont[0, idx]), y] = contour_class
-                    contours[np.max(cont[0, idx]), y] = contour_class
 
     if regression_active:
         coordinates = torch.zeros(instance_image.shape + (2,))
