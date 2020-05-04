@@ -8,6 +8,7 @@ from models.fcn import FCN
 from models.fpn import FPN
 from models.vgg import VGGNet
 from models.hed import EdgeDNN
+from models.steal import StealNMSLoss
 
 
 encoder_fn = {'resnet18': (resnet18), 'resnet34': (resnet34),

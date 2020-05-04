@@ -40,19 +40,6 @@ def get_task_cls(in_channels, out_channels, kenrel_size=(1, 1)):
     return nn.Sequential(nn.Conv2d(in_channels, out_channels, kenrel_size))
 
 
-def get_activation(activation, inplace=True):
-    if activation == 'ELU':
-        return nn.ELU(alpha=1.0, inplace=inplace)
-    elif activation == 'LeakyReLU':
-        return nn.LeakyReLU(negative_slope=0.01, inplace=inplace)
-    elif activation == 'PReLU':
-        return nn.PReLU(num_parameters=1, init=0.25)
-    elif activation == 'ReLU':
-        return nn.ReLU(inplace=inplace)
-    elif activation == 'Tanh':
-        return nn.Tanh()
-
-
 class Encoder_Decoder(nn.Module):
     def __init__(self, encoder, base_decoder_fn, cfg,
                  in_planes, out_planes):

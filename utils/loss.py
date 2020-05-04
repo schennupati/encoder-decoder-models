@@ -5,12 +5,13 @@ Created on Tue Jul 23 19:55:03 2019
 
 @author: sumche
 """
-# Source: https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loss/loss.py
+# Adapted from: https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loss/loss.py
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import time
-# from utils.data_utils import up_scale_tensors
+
+from models import StealNMSLoss
 
 
 def flatten_data(input, target):
@@ -27,7 +28,7 @@ def flatten_data(input, target):
     if h != ht and w != wt:  # upsample labels
         input = F.interpolate(input, size=(ht, wt),
                               mode="bilinear", align_corners=True)
-    input = input.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+    input = input.permute(0, 2, 3, 1).contiguous().view(-1, c)
     target = target.view(-1)
 
     return input, target
@@ -49,13 +50,18 @@ def weighted_binary_cross_entropy(input, target, weights=None):
         mask = get_weight_mask(label)
         prediction = input[:, class_id, ...]
         loss = F.binary_cross_entropy_with_logits(prediction, label, mask)
-        mean_loss += loss * \
-            weights[class_id] if weights[class_id] is not None else loss
+        mean_loss += loss * weights[class_id] if weights is not None else loss
+    return mean_loss
 
-    #nmsloss = StealNMSLoss()
-    #ln = nmsloss.__call__(target_onehot, input_soft)
 
-    return mean_loss  # +ln
+def weighted_binary_cross_entropy_with_nms(input, target, weights=None):
+    mean_loss = weighted_binary_cross_entropy(input, target, weights=weights)
+    nmsloss = StealNMSLoss()
+    n_classes = input.shape[1]
+    target = make_one_hot(target, n_classes)
+    input = torch.softmax(input, dim=1)
+    mean_ln = nmsloss.__call__(input, target)
+    return mean_loss + mean_ln
 
 
 def get_weight_mask(target):

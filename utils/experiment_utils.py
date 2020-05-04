@@ -184,6 +184,8 @@ class ExperimentLoop():
                 self.writer.close()
 
         self.writer.close()
+        logging.info('Stopping Training. Maximum Number of epochs: {} reached'
+                     .format(self.epochs))
 
     def validation(self):
         """Validate a model on a entire validation data."""
@@ -618,7 +620,7 @@ def print_metrics(metrics):
             if isinstance(score, dict):
                 header = score.keys()
                 t = PrettyTable(header)
-                t.title = task
+                logging.info(task.center(LENGTH, '='))
                 t.add_row(['{:05.3f}'.format(score[k] * 100)
                            for k in score.keys()])
                 print(t)
