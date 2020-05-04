@@ -189,7 +189,7 @@ def convert_data_type(data, data_type):
         return data.float()
 
 
-def get_labels(in_targets, cfg, device=None, get_postprocs=False):
+def get_labels(in_targets, cfg, get_postprocs=False):
     labels = {}
     active_outputs = get_active_tasks(cfg[MODEL][OUTPUTS])
     active_postprocs = get_active_tasks(cfg[POSTPROCS])
@@ -202,7 +202,7 @@ def get_labels(in_targets, cfg, device=None, get_postprocs=False):
                 label = label_fn(targets)
             else:
                 label = targets
-            labels[task] = convert_data_type(label, data_type).to(device)
+            labels[task] = convert_data_type(label, data_type).cuda()
         elif task == INSTANCE:
             contours_active = (
                 True if INSTANCE_CONTOUR in active_outputs else False)
@@ -212,7 +212,7 @@ def get_labels(in_targets, cfg, device=None, get_postprocs=False):
             dict_targets = label_fn(targets, (0, 2, 3, 1),
                                     contours_active, regression_active)
             for task in dict_targets.keys():
-                dict_targets[task] = dict_targets[task].to(device)
+                dict_targets[task] = dict_targets[task].cuda()
 
             panoptic_active = True if PANOPTIC in active_postprocs else False
 
@@ -448,17 +448,17 @@ def cityscapes_contour_weights(num_classes):
     return class_weights
 
 
-def get_weights(cfg, device):
+def get_weights(cfg):
     dataset = cfg['data']['dataset']
     tasks = cfg['model']['outputs']
     weights = {}
     for task in tasks.keys():
         if dataset == 'Cityscapes' and task == 'semantic':
             weight = cityscapes_semantic_weights(tasks[task]['out_channels'])
-            weights[task] = torch.FloatTensor(weight).to(device)
+            weights[task] = torch.FloatTensor(weight)
         elif dataset == 'Cityscapes' and task == 'instance_contour':
             weight = cityscapes_contour_weights(tasks[task]['out_channels'])
-            weights[task] = torch.FloatTensor(weight).to(device)
+            weights[task] = torch.FloatTensor(weight)
         else:
             weights[task] = None
 

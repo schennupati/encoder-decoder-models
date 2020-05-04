@@ -64,13 +64,12 @@ class ExperimentLoop():
         self.get_config_params()
 
         # Get device and writer
-        self.device = get_device(self.cfg)
         self.writer = get_writer(self.cfg)
 
         # Get dataloaders, model, weights, optimizers and metrics
         self.dataloaders = get_dataloaders(self.cfg)
-        self.model = get_model(self.cfg, self.device)  # TODO: print(model)
-        self.weights = get_weights(self.cfg, self.device)
+        self.model = get_model(self.cfg)  # TODO:
+        self.weights = get_weights(self.cfg)
         self.criterion = self.get_criterion()
         self.optimizer = self.init_optimizer()
         self.get_losses_and_metrics()
@@ -99,7 +98,7 @@ class ExperimentLoop():
         loss_fn = cfg[MODEL][LOSS_FN]
         criterion = MultiTaskLoss(cfg[MODEL][OUTPUTS],
                                   self.weights, loss_fn)
-        criterion = criterion.to(self.device)
+        criterion = place_on_multi_gpu(self.cfg, criterion)
         return criterion
 
     def init_optimizer(self):
@@ -204,11 +203,13 @@ class ExperimentLoop():
         self.optimizer.zero_grad()
         start = time()
         inputs, targets = data
-        labels = get_labels(targets, self.cfg, self.device)
+        inputs = inputs.cuda()
+        labels = get_labels(targets, self.cfg)
         loader_s = time() - start
 
         start = time()
-        logits = self.model(inputs.to(self.device))
+        self.model = self.model.cuda()
+        logits = self.model(inputs)
         predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                       labels)
         forward_s = time() - start
@@ -220,6 +221,7 @@ class ExperimentLoop():
         loss_s = time() - start
 
         start = time()
+        loss = loss.sum()
         loss.backward()
         self.optimizer.step()
         backward_s = time() - start
@@ -227,7 +229,7 @@ class ExperimentLoop():
         start = time()
         self.batch_size = inputs.shape[0]
         self.sample_idx = np.random.randint(0, self.batch_size, size=1)
-        self.writer.add_scalar('Loss/train', loss.data,
+        self.writer.add_scalar('Loss/train', loss.mean().data,
                                epoch*self.n_batches + batch)
         for task, task_loss in losses.items():
             self.writer.add_scalar('Loss/train_{}'.format(task),
@@ -266,12 +268,11 @@ class ExperimentLoop():
                 self.batch_size = inputs.shape[0]
                 self.sample_idx = np.random.randint(0, self.batch_size, size=1)
 
-                labels = get_labels(targets, self.cfg, self.device,
-                                    get_postprocs)
+                labels = get_labels(targets, self.cfg, get_postprocs)
                 loader_s = time() - start
 
                 start = time()
-                logits = self.model(inputs.to(self.device))
+                logits = self.model(inputs)
                 predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                               labels)
                 forward_s = time() - start
@@ -337,7 +338,7 @@ class ExperimentLoop():
         self.val_loss_meters.reset()
         self.val_metrics.reset()
         self.post_proc_metrics.reset()
-        self.val_loss = running_val_loss.avg.data
+        self.val_loss = running_val_loss.avg
         running_val_loss.reset()
 
     def send_predictions_to_writer(self, inputs, predictions, labels, meters,
@@ -403,25 +404,6 @@ class ExperimentLoop():
             logging.info((early_stop_str+patience_str).center(LENGTH, '='))
 
         return True
-
-
-def get_device(cfg):
-    """Get device to place data on.
-
-    Arguments:
-        cfg {[dict]} -- [configuration settings for the experiment]
-
-    Returns:
-        [device] -- [device to place data.]
-    """
-    if not cfg[PARAMS][MULTIGPU]:
-        # Select device specified in cfg.
-        device_str = GPU_STR.format(gpu_id=cfg[PARAMS][GPU_ID])
-    else:
-        # Chose the first available device for multi-gpu training
-        device_str = GPU_STR.format(gpu_id=0)
-    device = torch.device(device_str if torch.cuda.is_available() else CPU)
-    return device
 
 
 def get_exp_dir(cfg):
@@ -568,7 +550,7 @@ def if_checkpoint_exists(exp_dir):
     return True if len(list_of_models) != 0 else False
 
 
-def get_model(cfg, device):
+def get_model(cfg):
     """Get the model and place it on devices specified in config.
 
     Arguments:
@@ -579,9 +561,22 @@ def get_model(cfg, device):
         [model(torch.nn.Module) -- Neural network module defined for the
         experiment
     """
-    gpus = list(range(torch.cuda.device_count()))
     model = get_encoder_decoder(cfg)
-    model = model.to(device)
+    model = place_on_multi_gpu(cfg, model)
+    return model
+
+
+def place_on_multi_gpu(cfg, model):
+    """Place model on multiple GPUS.
+
+    Arguments:
+        cfg {[dict]} -- [configuration settings for the experiment]
+        model {[torch.nn.Module]} -- [Neural Network Model to place on GPUs]
+
+    Returns:
+        [torch.nn.Module] -- [Neural Network Model on Multiple GPUs]
+    """
+    gpus = list(range(torch.cuda.device_count()))
     multigpu = cfg[PARAMS][MULTIGPU]
     if len(gpus) > 1 and multigpu:
         model = nn.DataParallel(model, device_ids=gpus, dim=0)

@@ -3,24 +3,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from kornia import filters
+from kornia.filters import filter2D, SpatialGradient
 
 
 class StealNMSLoss(nn.Module):
-    def __init__(self, r=2, tau=0.1):
+    def __init__(self, r=3, tau=0.1):
         super(StealNMSLoss, self).__init__()
-        self.grad2d = filters.SpatialGradient()
+        self.grad2d = SpatialGradient()
         self.nms_loss = 0
         self.r = r
         self.tau = tau
         self.eps = 1e-7
-        self.vert_k = torch.zeros((2*r-1, 2*r-1)).unsqueeze_(0)
-        self.vert_k[:, :, r-1] = 1
-        self.horiz_k = torch.zeros((2*r-1, 2*r-1)).unsqueeze_(0)
-        self.horiz_k[:, r-1, :] = 1
-        self.lead_diag_k = torch.eye(2*r-1).unsqueeze_(0)
-        cnt_diag_k = np.array(np.fliplr(np.eye(2*r-1)))
-        self.cnt_diag_k = torch.tensor(cnt_diag_k).unsqueeze_(0)
+        self.filter_dict = get_filter_dict(r)
 
     def get_grads(self, true_labels):
         """
@@ -41,69 +35,75 @@ class StealNMSLoss(nn.Module):
 
         return angle
 
-    def __call__(self, true_labels, pred_labels):
+    def forward(self, pred_labels, true_labels):
         """
         NMS loss calculation.
         """
         # Find edge directions
-        grad_angles = self.get_grads(true_labels.float())
+        self.angles = self.get_grads(true_labels.float())
 
-        true_edge_mask = (true_labels > 0).float()
-        thresh_horiz = \
-            torch.mul(true_edge_mask,
-                      (((grad_angles >= 0) & (grad_angles < 22.5)) |
-                       ((grad_angles >= 157.5) & (grad_angles < 180))).float())
+        # Create all possible direction NMS and mask them.
+        self.exp_preds = torch.exp(pred_labels/self.tau)
 
-        thresh_cnt_diag = \
-            torch.mul(true_edge_mask,
-                      (((grad_angles >= 22.5) & (grad_angles < 67.5))).float())
+        return - torch.mean(get_all_nms(self.exp_preds, self.filter_dict,
+                                        self.angles))
 
-        thresh_vert = \
-            torch.mul(true_edge_mask,
-                      (((grad_angles >= 67.5) & (grad_angles < 112.5))).float())
 
-        thresh_lead_diag = \
-            torch.mul(true_edge_mask,
-                      (((grad_angles > 112.5) & (grad_angles < 157.5))).float())
+def get_mask_from_section(angles, section='horizontal'):
+    if section == 'horizontal':
+        return (get_mask_from_angle(angles, 0.0, 22.5) |
+                get_mask_from_angle(angles, 157.5, 180)).float()
+    elif section == 'cnt_diag':
+        return get_mask_from_angle(angles, 22.5, 67.5).float()
+    elif section == 'lead_diag':
+        return get_mask_from_angle(angles, 112.5, 157.5).float()
+    elif section == 'vertical':
+        return get_mask_from_angle(angles, 67.5, 112.5).float()
 
-        # Create all possible direction NMS
-        exp_preds = torch.exp(pred_labels.float() * self.tau)
-        horiz_filter = filters.filter2D(exp_preds, self.horiz_k)
-        vert_filter = filters.filter2D(exp_preds, self.vert_k)
-        lead_diag_filter = filters.filter2D(exp_preds, self.lead_diag_k)
-        cnt_diag_filter = filters.filter2D(exp_preds, self.cnt_diag_k)
 
-        # Generate masked NMS
-        horiz_nms = \
-            torch.mul(thresh_horiz,
-                      torch.log(torch.clamp(torch.div(exp_preds,
-                                                      horiz_filter
-                                                      + self.eps),
-                                            self.eps, 1))).unsqueeze_(1)
+def get_mask_from_angle(angles, start, end):
+    return (angles >= start) & (angles < end)
 
-        vert_nms = \
-            torch.mul(thresh_vert,
-                      torch.log(torch.clamp(torch.div(exp_preds,
-                                                      vert_filter
-                                                      + self.eps),
-                                            self.eps, 1))).unsqueeze_(1)
 
-        lead_diag_nms = \
-            torch.mul(thresh_lead_diag,
-                      torch.log(torch.clamp(torch.div(exp_preds,
-                                                      lead_diag_filter
-                                                      + self.eps),
-                                            self.eps, 1))).unsqueeze_(1)
-        cnt_diag_nms = \
-            torch.mul(thresh_cnt_diag,
-                      torch.log(torch.clamp(torch.div(exp_preds,
-                                                      cnt_diag_filter
-                                                      + self.eps),
-                                            self.eps, 1))).unsqueeze_(1)
+def get_normalized_responses(exp_preds, filter_dict,
+                             section='horizontal', eps=1e-6):
 
-        all_nms = torch.cat(
-            (horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1)
+    sum_boundary_responses = filter2D(exp_preds, filter_dict[section]) + eps
+    norm = torch.div(exp_preds, sum_boundary_responses)
 
-        nms_loss = -torch.mean(torch.sum(all_nms, (1, 2, 3, 4)))
+    return torch.clamp(norm, eps, 1)
 
-        return nms_loss
+
+def get_nms_from_section(exp_preds, filter_dict, angles, section='horizontal'):
+    norm = get_normalized_responses(exp_preds, filter_dict,
+                                    section='horizontal',)
+    mask = get_mask_from_section(angles, section)
+    return (torch.log(norm) * mask).unsqueeze_(1)
+
+
+def get_all_nms(exp_preds, filter_dict, angles):
+    horiz_nms = get_nms_from_section(exp_preds, filter_dict,
+                                     angles, section='horizontal')
+    vert_nms = get_nms_from_section(exp_preds, filter_dict,
+                                    angles, section='cnt_diag')
+    lead_diag_nms = get_nms_from_section(exp_preds, filter_dict,
+                                         angles, section='lead_diag')
+    cnt_diag_nms = get_nms_from_section(exp_preds, filter_dict,
+                                        angles, section='vertical')
+
+    return torch.cat((horiz_nms, vert_nms, lead_diag_nms, cnt_diag_nms), 1)
+
+
+def get_filter_dict(r=2):
+    # can be 1D fiters?
+    filter_dict = {}
+    vert = torch.zeros((2 * r - 1, 2 * r - 1)).unsqueeze_(0)
+    vert[:, :, r-1] = 1
+    filter_dict['vertical'] = vert
+    horiz = torch.zeros((2 * r - 1, 2 * r - 1)).unsqueeze_(0)
+    horiz[:, r-1, :] = 1
+    filter_dict['horizontal'] = horiz
+    filter_dict['lead_diag'] = torch.eye(2*r-1).unsqueeze_(0)
+    cnt_diag = np.array(np.fliplr(np.eye(2*r-1)))
+    filter_dict['cnt_diag'] = torch.tensor(cnt_diag).unsqueeze_(0)
+    return filter_dict

@@ -133,7 +133,7 @@ data:
 
 params:
   savelogs: True
-  batchsize: &batch_size 24
+  batchsize: &batch_size 16
   n_workers: &n_workers 8
   multigpu: True
   gpu_id: 1
@@ -152,6 +152,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 16
+    batch_size: 12
     shuffle: True
     n_workers: *n_workers

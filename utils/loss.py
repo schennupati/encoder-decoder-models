@@ -7,11 +7,14 @@ Created on Tue Jul 23 19:55:03 2019
 """
 # Adapted from: https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loss/loss.py
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import time
+import logging
 
 from models import StealNMSLoss
+from utils.constants import LENGTH
 
 
 def flatten_data(input, target):
@@ -54,6 +57,64 @@ def weighted_binary_cross_entropy(input, target, weights=None):
     return mean_loss
 
 
+class CrossEntropy2D(nn.Module):
+    def __init__(self, class_weights=None, ignore_index=255):
+        super(CrossEntropy2D, self).__init__()
+        self.weight = class_weights
+        self.ignore_index = ignore_index
+
+    def forward(self, input, target):
+        input, target = flatten_data(input, target)
+        weight = self.weight.cuda()
+        return F.cross_entropy(input, target, weight,
+                               ignore_index=self.ignore_index)
+
+
+class WeightedBCELoss(nn.Module):
+    def __init__(self):
+        super(WeightedBCELoss, self).__init__()
+
+    def forward(self, input, target, weight):
+        loss = F.binary_cross_entropy_with_logits(input, target, weight=weight)
+        return loss
+
+
+class MultiLabelLoss(nn.Module):
+    def __init__(self, class_weights, nms=False):
+        super(MultiLabelLoss, self).__init__()
+        self.pos_weight = class_weights
+        self.bce = WeightedBCELoss()
+        if nms:
+            self.nms = StealNMSLoss()
+
+    def forward(self, input, target):
+        n_classes = input.shape[1]
+        target = make_one_hot(target, n_classes)
+        mask = self.get_weight_mask(target, n_classes)
+        bce_loss = self.bce(input.view(-1), target.view(-1), mask)
+        if self.nms:
+            input = torch.softmax(input, dim=1)
+            nms_loss = self.nms(input, target)
+        logging.info('bce_loss: {}, nms_loss: {}'
+                     .format(bce_loss, nms_loss).center(LENGTH, '='))
+        return 10*bce_loss + nms_loss
+
+    def get_weight_mask(self, target, n_classes):
+        n, _, h, w = target.size()
+        beta = torch.zeros((n, n_classes, h, w))
+        device = target.get_device()
+        for i in range(n_classes):
+            mask = (target[:, i, ...] != 0).float()
+            num_positive = torch.sum(mask).float()
+            num_negative = mask.numel() - num_positive
+            mask[mask != 0] = \
+                (num_negative * self.pos_weight[i]) / mask.numel()
+            mask[mask == 0] = num_positive / mask.numel()
+            beta[:, i, ...] = mask
+        beta = beta.view(-1).cuda()
+        return beta
+
+
 def weighted_binary_cross_entropy_with_nms(input, target, weights=None):
     mean_loss = weighted_binary_cross_entropy(input, target, weights=weights)
     nmsloss = StealNMSLoss()
@@ -64,22 +125,13 @@ def weighted_binary_cross_entropy_with_nms(input, target, weights=None):
     return mean_loss + mean_ln
 
 
-def get_weight_mask(target):
-    mask = (target != 0).float()
-    num_positive = torch.sum(mask).float()
-    num_negative = mask.numel() - num_positive
-    mask[mask != 0] = num_negative / mask.numel()
-    mask[mask == 0] = num_positive / mask.numel()
-    return mask
-
-
 def make_one_hot(labels, num_classes=10):
     n, h, w = labels.size()
     one_hot = torch.zeros((n, num_classes, h, w), dtype=labels.dtype)
     # handle ignore labels
     for class_id in range(num_classes):
         one_hot[:, class_id, ...] = (labels == class_id+1)
-    return one_hot.to(labels.get_device())
+    return one_hot.cuda()
 
 
 def dice_loss(input_soft, target, eps=1e-8):
