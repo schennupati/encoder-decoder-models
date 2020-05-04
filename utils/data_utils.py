@@ -379,7 +379,7 @@ def get_class_weights_from_data(loader, num_classes, cfg, task):
     # get the total number of pixels in all train label_imgs that are of each object class:
     for data in tqdm(loader):
         _, labels = data
-        labels = convert_targets(labels, cfg['tasks'])
+        labels = get_labels(labels, cfg)
         for label_img in labels[task]:
             for trainId in range(num_classes):
                 # count how many pixels in label_img which are of object class trainId:
@@ -395,7 +395,7 @@ def get_class_weights_from_data(loader, num_classes, cfg, task):
     total_count = sum(trainId_to_count.values())
     for trainId, count in trainId_to_count.items():
         trainId_prob = float(count)/float(total_count)
-        trainId_weight = 1/np.log(1.02 + trainId_prob)
+        trainId_weight = 1/(trainId_prob + 1e-6)
         class_weights.append(trainId_weight)
 
     return class_weights
@@ -436,11 +436,11 @@ def cityscapes_semantic_weights(num_classes):
 
 def cityscapes_contour_weights(num_classes):
     if num_classes == 9:
-        class_weights = [1.427197976828025, 47.66104006965641,
-                         50.0977099173462, 44.04363870779025,
-                         50.31372660864973, 50.31163764506638,
-                         50.36620380700314, 50.32661428022733,
-                         49.834611789928324]
+        class_weights = [1.4330482940399303, 44.544652325494134,
+                         49.583833233762675, 38.52347948228032,
+                         50.04938332217262, 50.04168347303746,
+                         50.172824928365245, 50.1235766621057,
+                         48.984063624915116]
 
     else:
         raise ValueError('Invalid number of classes for Cityscapes dataset')

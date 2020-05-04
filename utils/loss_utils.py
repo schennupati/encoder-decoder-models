@@ -74,21 +74,22 @@ class MultiTaskLoss(nn.Module):
         for task in active_tasks:
             prediction = predictions[task]
             target = targets[task]
-            weight = self.weights[task]
+            weights = self.weights[task]
             loss_fn = self.cfg[task]['loss']
-            self.losses[task] = self.compute_task_loss(prediction,
-                                                       target, weight, loss_fn)
+            self.losses[task] = self.compute_task_loss(prediction, target,
+                                                       weights, loss_fn)
 
         device = self.losses[task].get_device()
         self.sigma.to(device)
         total_loss = self.compute_total_loss()
         return self.losses, total_loss
 
-    def compute_task_loss(self, prediction, target, weight, loss_fn):
+    def compute_task_loss(self, prediction, target, weights, loss_fn):
         if loss_fn == 'cross_entropy2d':
-            loss = cross_entropy2d(prediction, target.long(), weight=weight)
+            loss = cross_entropy2d(prediction, target.long(), weights=weights)
         elif loss_fn == 'weighted_binary_cross_entropy':
-            loss = weighted_binary_cross_entropy(prediction, target.long())
+            loss = weighted_binary_cross_entropy(prediction, target.long(),
+                                                 weights=weights)
         elif loss_fn == 'l1':
             non_zeros = torch.nonzero(target).size(0)
             if prediction.size() != target.size():

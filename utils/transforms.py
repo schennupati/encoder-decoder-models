@@ -74,6 +74,13 @@ def get_transform_from_name(transform_name, params):
     elif transform_name == 'RandomHorizontalFlip':
         return transforms.RandomHorizontalFlip(p=0.5)
 
+    elif transform_name == 'FiveCrop':
+        return transforms.FiveCrop(size=params['size'])
+
+    elif transform_name == 'RandomResizedCrop':
+        return transforms.RandomResizedCrop(size=params['size'],
+                                            scale=params['scale'])
+
     elif transform_name == 'ColorJitter':
         return transforms.ColorJitter(brightness=params['brightness'],
                                       contrast=params['contrast'],

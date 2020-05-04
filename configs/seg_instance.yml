@@ -16,7 +16,7 @@ model:
       active: &contour_active True
       out_channels: 9
       loss: weighted_binary_cross_entropy
-      loss_weight: 100.0
+      loss_weight: 1.0
       metric: classification_metrics # TODO: panoptic_metrics
       postproc: argmax
     instance_regression:
@@ -80,6 +80,10 @@ data:
         RandomCrop:
           flag: True
           size: *im_size
+        RandomResizedCrop:
+          flag: False
+          size: *im_size
+          scale: *random_scaling
         RandomHorizontalFlip:
           flag: True
         ColorJitter:
@@ -101,6 +105,10 @@ data:
         RandomCrop:
           flag: True
           size: *im_size
+        RandomResizedCrop:
+          flag: False
+          size: *im_size
+          scale: *random_scaling
         RandomHorizontalFlip:
           flag: True
         ToTensor:
@@ -144,6 +152,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 20
+    batch_size: 16
     shuffle: True
     n_workers: *n_workers

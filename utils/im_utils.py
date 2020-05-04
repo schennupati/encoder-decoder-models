@@ -204,3 +204,21 @@ def get_color_inst(inst_seg):
     colour_inst = colour_inst / np.max(colour_inst)
 
     return colour_inst
+
+
+def to_rgb(bw_im):
+    instances = np.unique(bw_im)
+    instances = instances[instances != 0]
+    rgb_im = [np.zeros(bw_im.shape, dtype=int),
+              np.zeros(bw_im.shape, dtype=int),
+              np.zeros(bw_im.shape, dtype=int)]
+    for instance in instances:
+        color = get_color(instance)
+        rgb_im[0][instance == bw_im] = color[0]
+        rgb_im[1][instance == bw_im] = color[1]
+        rgb_im[2][instance == bw_im] = color[2]
+    return np.stack([rgb_im[0], rgb_im[1], rgb_im[2]], axis=-1)
+
+
+def get_color(num):
+    return np.random.randint(0, 255, size=(3))

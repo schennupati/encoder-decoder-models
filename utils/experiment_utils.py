@@ -29,7 +29,7 @@ from utils.loss_utils import loss_meters, MultiTaskLoss, averageMeter
 from utils.im_utils import cat_labels, prob_labels, inst_labels, labels
 from utils.writer_utils import add_images_to_writer
 from utils.data_utils import get_labels, get_weights, get_predictions, \
-    post_process_predictions
+    post_process_predictions, get_class_weights_from_data
 from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     START_ITER, PLATEAU_COUNT, STATE, GPU_STR, GPU_ID, CPU, PARAMS, MODEL, \
     ENCODER, DECODER, DATA, IM_SIZE, PRETRAINED_PATH, ROOT_PATH, RESULTS_DIR, \
@@ -156,6 +156,8 @@ class ExperimentLoop():
                          format(self.cfg[MODEL][LOSS_FN], loss_weights)
                          .center(LENGTH, '='))
             self.n_batches = len(self.dataloaders[TRAIN])
+            # _ = get_class_weights_from_data(
+            #    self.dataloaders[TRAIN], 9, self.cfg, task=INSTANCE_CONTOUR)
             self.train_running_loss = averageMeter()
             start = time()
             for batch_id, data in enumerate(self.dataloaders[TRAIN]):
@@ -166,7 +168,13 @@ class ExperimentLoop():
             for task, task_loss in self.train_loss_meters.meters.items():
                 loss_str += TASK_LOSS.format(task, task_loss.avg)
             logging.info(loss_str + 'Time: {:05.3f}'.format(train_s))
+
             self.validation_step(epoch)
+
+            if epoch % self.print_interval == 0 and epoch > 0:
+                self.mode == VAL
+                self.validation_step(epoch)
+                self.mode == TRAIN
 
             self.train_running_loss.reset()
             self.train_loss_meters.reset()
@@ -250,13 +258,14 @@ class ExperimentLoop():
         running_val_loss = averageMeter()
         with torch.no_grad():
             for i, data in enumerate(self.dataloaders[VAL]):
+                get_postprocs = True if self.mode == VAL else False
                 start = time()
                 inputs, targets = data
                 self.batch_size = inputs.shape[0]
                 self.sample_idx = np.random.randint(0, self.batch_size, size=1)
 
                 labels = get_labels(targets, self.cfg, self.device,
-                                    get_postprocs=True)
+                                    get_postprocs)
                 loader_s = time() - start
 
                 start = time()
@@ -300,7 +309,7 @@ class ExperimentLoop():
 
                 val_s = loader_s + forward_s + backward_s + \
                     loss_s + postproc_s + writer_s + metric_s
-                logging.info(BATCH_LOG.format(epoch+1, i,
+                logging.info(BATCH_LOG.format(0, i,
                                               len(self.dataloaders[VAL]),
                                               val_s, loader_s, forward_s,
                                               backward_s, loss_s,
@@ -370,8 +379,12 @@ class ExperimentLoop():
             if deleted_old:
                 logging.info('Deleted old checkpoints'.center(LENGTH, '='))
                 self.plateau_count = 0
-            else:
-                self.plateau_count += 1
+        else:
+            self.plateau_count += 1
+            logging.info("""Best Loss: {}. Current Loss: {}. /
+                          No Checkpoint saved. Plateau_count: {}/{}"""
+                         .format(self.best_loss, self.val_loss,
+                                 self.plateau_count, self.patience))
 
     def stop_training(self, epoch):
         """Stop training if stop criteria is met.
@@ -386,6 +399,7 @@ class ExperimentLoop():
             early_stop_str = EARLY_STOP_STR.format(epochs=epoch+1)
             patience_str = PATIENCE_STR.format(patience=self.plateau_count)
             logging.info((early_stop_str+patience_str).center(LENGTH, '='))
+
         return True
 
 

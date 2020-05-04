@@ -33,14 +33,14 @@ def flatten_data(input, target):
     return input, target
 
 
-def cross_entropy2d(input, target, weight=None, size_average=True):
+def cross_entropy2d(input, target, weights=None, size_average=True):
     input, target = flatten_data(input, target)
     loss = F.cross_entropy(input, target,
-                           weight=weight, ignore_index=255)
+                           weight=weights, ignore_index=255)
     return loss
 
 
-def weighted_binary_cross_entropy(input, target):
+def weighted_binary_cross_entropy(input, target, weights=None):
     input, target = flatten_data(input, target)
     n_classes = input.shape[1]
     mean_loss = 0.0
@@ -49,7 +49,8 @@ def weighted_binary_cross_entropy(input, target):
         mask = get_weight_mask(label)
         prediction = input[:, class_id, ...]
         loss = F.binary_cross_entropy_with_logits(prediction, label, mask)
-        mean_loss += loss
+        mean_loss += loss * \
+            weights[class_id] if weights[class_id] is not None else loss
 
     #nmsloss = StealNMSLoss()
     #ln = nmsloss.__call__(target_onehot, input_soft)

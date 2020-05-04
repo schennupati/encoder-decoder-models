@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import matplotlib
 from utils.im_utils import decode_segmap, labels, inst_labels, prob_labels, \
-    get_color_inst
+    get_color_inst, to_rgb
 from utils.constants import PLOTS_DIR, TRAIN, VAL, HWC, CHW, INPUT_IMAGE, \
     IMAGES, SEMANTIC, INSTANCE_CONTOUR, INSTANCE_REGRESSION, INSTANCE_HEATMAP,\
     INSTANCE_PROBS, INPUT_SAVE_NAME, OUTPUT_SAVE_NAME, INPUT_WRITER_NAME, \
@@ -151,6 +151,11 @@ def generate_task_visuals(data, task):
         data = np.clip(data, 0, np.max(data))
     elif task == INSTANCE_PROBS:
         data = decode_segmap(data, nc=2, labels=prob_labels)
+    elif task == PANOPTIC:
+        data = data[..., 0] + \
+            256 * data[..., 1] + \
+            256 * 256 * data[..., 2]
+        data = to_rgb(data)
     else:
         data = data
     return data
