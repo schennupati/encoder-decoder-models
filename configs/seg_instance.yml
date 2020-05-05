@@ -1,6 +1,6 @@
 model:
   arch: encoder_decoder # Shared encoder and independent decoders
-  encoder: resnet50
+  encoder: efficientnet_b0
   decoder: fpn
   pretrained_path: /home/sumche/results
   loss_fn: fixed # fixed, uncertainty etc
@@ -15,7 +15,7 @@ model:
     instance_contour:
       active: &contour_active True
       out_channels: 9
-      loss: weighted_binary_cross_entropy_with_nms
+      loss: weighted_binary_cross_entropy
       loss_weight: 1.0
       metric: classification_metrics # TODO: panoptic_metrics
       postproc: argmax
@@ -68,9 +68,9 @@ postprocs:
 data:
   dataset: Cityscapes
   root_path: /home/sumche/datasets/Cityscapes
-  im_size: &im_size 256
+  im_size: &im_size 512
   random_scaling: !!python/tuple &random_scaling [0.5, 1.0]
-  val_im_size: &val_im_size 512
+  val_im_size: &val_im_size 1024
   transforms:
     train:
       input:
@@ -133,7 +133,7 @@ data:
 
 params:
   savelogs: True
-  batchsize: &batch_size 16
+  batchsize: &batch_size 7
   n_workers: &n_workers 8
   multigpu: True
   gpu_id: 1
@@ -152,6 +152,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 12
+    batch_size: 5
     shuffle: True
     n_workers: *n_workers

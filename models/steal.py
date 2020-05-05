@@ -97,13 +97,13 @@ def get_all_nms(exp_preds, filter_dict, angles):
 def get_filter_dict(r=2):
     # can be 1D fiters?
     filter_dict = {}
-    vert = torch.zeros((2 * r - 1, 2 * r - 1)).unsqueeze_(0)
-    vert[:, :, r-1] = 1
-    filter_dict['vertical'] = vert
     horiz = torch.zeros((2 * r - 1, 2 * r - 1)).unsqueeze_(0)
-    horiz[:, r-1, :] = 1
+    horiz[:, :, r-1] = 1
     filter_dict['horizontal'] = horiz
-    filter_dict['lead_diag'] = torch.eye(2*r-1).unsqueeze_(0)
-    cnt_diag = np.array(np.fliplr(np.eye(2*r-1)))
-    filter_dict['cnt_diag'] = torch.tensor(cnt_diag).unsqueeze_(0)
+    vert = torch.zeros((2 * r - 1, 2 * r - 1)).unsqueeze_(0)
+    vert[:, r-1, :] = 1
+    filter_dict['vertical'] = vert
+    filter_dict['cnt_diag'] = torch.eye(2*r-1).unsqueeze_(0)
+    lead_diag = np.array(np.fliplr(np.eye(2*r-1)))
+    filter_dict['lead_diag'] = torch.tensor(lead_diag).unsqueeze_(0)
     return filter_dict

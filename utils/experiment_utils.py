@@ -152,6 +152,7 @@ class ExperimentLoop():
             logging.info(TRAIN_STR.center(LENGTH, '='))
             self.loss_weights = self.criterion.module.sigma \
                 if self.cfg[PARAMS][MULTIGPU] else self.criterion.sigma
+            #self.loss_weights =  self.criterion.sigma
             logging.info('MTL Loss type: {}, Loss weights: {}'.
                          format(self.cfg[MODEL][LOSS_FN], self.loss_weights)
                          .center(LENGTH, '='))
@@ -162,6 +163,7 @@ class ExperimentLoop():
             start = time()
             for batch_id, data in enumerate(self.dataloaders[TRAIN]):
                 self.train_step(data, epoch, batch_id)
+                # break
             train_s = time() - start
             loss_str = LOSS_STR.format(epoch=epoch+1,
                                        loss=self.train_running_loss.avg)
@@ -222,9 +224,10 @@ class ExperimentLoop():
         loss_s = time() - start
 
         start = time()
-        loss = loss.sum()
+        loss = loss.mean()
         loss.backward()
         self.optimizer.step()
+        # torch.cuda.empty_cache()
         backward_s = time() - start
 
         start = time()
@@ -283,6 +286,8 @@ class ExperimentLoop():
 
                 start = time()
                 val_losses, val_loss = self.criterion(logits, labels)
+                val_loss = val_loss.mean().data
+                # torch.cuda.empty_cache()
                 self.val_loss_meters.update(val_losses)
                 running_val_loss.update(val_loss)
                 loss_s = time() - start
@@ -310,7 +315,7 @@ class ExperimentLoop():
                                                 self.post_proc_metrics, i, VAL,
                                                 save_to_disk=True)
                     writer_s = time() - start
-
+                # break
                 val_s = loader_s + forward_s + backward_s + \
                     loss_s + postproc_s + writer_s + metric_s
                 logging.info(BATCH_LOG.format(0, i,
@@ -324,9 +329,9 @@ class ExperimentLoop():
                                            loss=running_val_loss.avg)
             self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
             for task, loss in self.val_loss_meters.meters.items():
-                loss_str += TASK_LOSS.format(task, loss.avg)
+                loss_str += TASK_LOSS.format(task, loss.avg.mean())
                 self.writer.add_scalar('Loss/Validation_{}'.format(task),
-                                       loss.avg, epoch)
+                                       loss.avg.mean(), epoch)
                 self.send_predictions_to_writer(inputs, predictions,
                                                 labels, self.val_loss_meters,
                                                 epoch, VAL)
