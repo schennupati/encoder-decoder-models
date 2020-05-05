@@ -13,41 +13,6 @@ import pdb
 from utils.loss import cross_entropy2d, huber_loss, mae_loss, mse_loss, \
     weighted_binary_cross_entropy, weighted_binary_cross_entropy_with_nms, \
     flatten_data, MultiLabelLoss, CrossEntropy2D
-loss_map = {
-    'cross_entropy2d': (cross_entropy2d),
-    'weighted_binary_cross_entropy': (weighted_binary_cross_entropy),
-    'weighted_binary_cross_entropy_with_nms':
-        (weighted_binary_cross_entropy_with_nms),
-    'huber_loss': (huber_loss),
-    'mae_loss': (mae_loss),
-    'mse_loss': (mse_loss)}
-
-
-def get_loss_fn(loss_type):
-    return loss_map[loss_type] if loss_type in loss_map.keys() else None
-
-
-def compute_task_loss(inputs, targets, weights, loss_type):
-    loss_fn = get_loss_fn(loss_type)
-    return loss_fn(inputs, targets, weights)
-
-
-def compute_loss(predictions, targets, cfg, weights=None):
-    out_loss = 0.0
-    losses = {}
-
-    for task in cfg.keys():
-        prediction = predictions[task]
-        target = targets[task]
-        weight = weights[task] if weights is not None else None
-        loss_weight = cfg[task]['loss_weight']
-        loss_type = cfg[task]['loss']
-        loss = compute_task_loss(prediction, target, weight, loss_type)
-
-        losses[task] = loss
-        out_loss += loss_weight*loss
-
-    return losses, out_loss
 
 
 class MultiTaskLoss(nn.Module):
@@ -65,7 +30,7 @@ class MultiTaskLoss(nn.Module):
             self.sigma = {task: cfg[task]['loss_weight']
                           for task in self.active_tasks}
         elif loss_type == 'uncertainty':
-            self.sigma = nn.Parameter(torch.ones(self.n))
+            self.sigma = nn.Parameter(torch.ones(self.n)).cuda()
         else:
             raise ValueError('Unkown loss_type')
         self.loss_type = loss_type
@@ -102,27 +67,29 @@ class MultiTaskLoss(nn.Module):
             self.losses[task] = \
                 self.loss_fn[task](predictions[task], targets[task])
 
-        device = self.losses[task].get_device()
         total_loss = self.compute_total_loss()
         return self.losses, total_loss
 
     def compute_total_loss(self):
         loss = 0.0
         if self.loss_type == 'fixed':
-            sigmas = []
             for task in self.losses.keys():
-                loss += self.losses[task] * self.sigma[task]
+                loss_weight = torch.tensor(self.sigma[task]).cuda()
+                task_loss = self.losses[task].cuda()
+                loss += task_loss * loss_weight
 
         elif self.loss_type == 'uncertainty':
+            sigma = (self.sigma).cuda()
             for i, task in enumerate(self.losses.keys()):
+                task_loss = self.losses[task].cuda()
                 if self.cfg[task]['loss'] \
                     in ['cross_entropy2d', 'weighted_binary_cross_entropy',
                         'weighted_multiclass_cross_entropy']:
-                    loss += torch.exp(-self.sigma[i]) * self.losses[task] + \
-                        0.5*self.sigma[i]
+                    loss += torch.exp(-sigma[i]) * task_loss + \
+                        0.5*sigma[i]
                 elif self.cfg[task]['loss'] in ['l1', 'l2']:
-                    loss += 0.5 * torch.exp(-self.sigma[i]) * \
-                        self.losses[task] + self.sigma[i]
+                    loss += 0.5 * \
+                        torch.exp(-sigma[i]) * task_loss + sigma[i]
         return loss
 
 

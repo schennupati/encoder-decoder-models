@@ -150,9 +150,10 @@ class ExperimentLoop():
         for epoch in range(self.epochs):
             logging.info(EPOCH_STR.format(epoch=epoch+1).center(LENGTH, '='))
             logging.info(TRAIN_STR.center(LENGTH, '='))
-            loss_weights = self.criterion.sigma
+            self.loss_weights = self.criterion.module.sigma \
+                if self.cfg[PARAMS][MULTIGPU] else self.criterion.sigma
             logging.info('MTL Loss type: {}, Loss weights: {}'.
-                         format(self.cfg[MODEL][LOSS_FN], loss_weights)
+                         format(self.cfg[MODEL][LOSS_FN], self.loss_weights)
                          .center(LENGTH, '='))
             self.n_batches = len(self.dataloaders[TRAIN])
             # _ = get_class_weights_from_data(
@@ -233,7 +234,7 @@ class ExperimentLoop():
                                epoch*self.n_batches + batch)
         for task, task_loss in losses.items():
             self.writer.add_scalar('Loss/train_{}'.format(task),
-                                   task_loss.data,
+                                   task_loss.mean().data,
                                    epoch*self.n_batches + batch)
         if batch == 0:
             self.send_predictions_to_writer(inputs, predictions, labels,

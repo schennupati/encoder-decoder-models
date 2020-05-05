@@ -86,6 +86,8 @@ class MultiLabelLoss(nn.Module):
         self.bce = WeightedBCELoss()
         if nms:
             self.nms = StealNMSLoss()
+        else:
+            self.nms = None
 
     def forward(self, input, target):
         n_classes = input.shape[1]
@@ -95,9 +97,11 @@ class MultiLabelLoss(nn.Module):
         if self.nms:
             input = torch.softmax(input, dim=1)
             nms_loss = self.nms(input, target)
-        logging.info('bce_loss: {}, nms_loss: {}'
-                     .format(bce_loss, nms_loss).center(LENGTH, '='))
-        return 10*bce_loss + nms_loss
+            # logging.info('bce_loss: {}, nms_loss: {}'
+            #             .format(bce_loss, nms_loss).center(LENGTH, '='))
+            return 10 * bce_loss + nms_loss
+        else:
+            return bce_loss
 
     def get_weight_mask(self, target, n_classes):
         n, _, h, w = target.size()

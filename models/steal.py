@@ -40,13 +40,13 @@ class StealNMSLoss(nn.Module):
         NMS loss calculation.
         """
         # Find edge directions
-        self.angles = self.get_grads(true_labels.float())
+        angles = self.get_grads(true_labels.float())
 
         # Create all possible direction NMS and mask them.
-        self.exp_preds = torch.exp(pred_labels/self.tau)
+        exp_preds = torch.exp(pred_labels/self.tau)
 
-        return - torch.mean(get_all_nms(self.exp_preds, self.filter_dict,
-                                        self.angles))
+        return - torch.mean(get_all_nms(exp_preds, self.filter_dict,
+                                        angles))
 
 
 def get_mask_from_section(angles, section='horizontal'):
