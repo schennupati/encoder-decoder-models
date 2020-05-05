@@ -44,7 +44,7 @@ EPOCH = 'epoch'
 BEST_LOSS = 'best_loss'
 OPTIMIZER = 'optimizer'
 
-RESULTS_DIR = os.path.join(os.path.expanduser('~'), 'results')
+RESULTS_DIR = os.path.join(os.getcwd(), 'results')
 PLOTS_DIR = os.path.join(RESULTS_DIR, 'plots')
 EXPERIMENT_NAME = '{encoder_name}-{decoder_name}-{imsize}'
 LOSS_STR = "Epoch-{epoch}: Loss: {loss} "

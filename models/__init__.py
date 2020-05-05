@@ -6,7 +6,6 @@ from models.efficientnet import efficientnet_b0, efficientnet_b1, \
 
 from models.fcn import FCN
 from models.fpn import FPN
-from models.vgg import VGGNet
 from models.hed import EdgeDNN
 from models.steal import StealNMSLoss
 
