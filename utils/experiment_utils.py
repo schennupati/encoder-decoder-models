@@ -150,8 +150,8 @@ class ExperimentLoop():
         for epoch in range(self.epochs):
             logging.info(EPOCH_STR.format(epoch=epoch+1).center(LENGTH, '='))
             logging.info(TRAIN_STR.center(LENGTH, '='))
-            loss_weights = [p.data for p in self.criterion.parameters()]
-            logging.info('MTL Loss type: {}, Loss weights {}'.
+            loss_weights = self.criterion.sigma
+            logging.info('MTL Loss type: {}, Loss weights: {}'.
                          format(self.cfg[MODEL][LOSS_FN], loss_weights)
                          .center(LENGTH, '='))
             self.n_batches = len(self.dataloaders[TRAIN])
