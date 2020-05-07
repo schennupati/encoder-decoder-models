@@ -143,6 +143,8 @@ def generate_task_visuals(data, task):
     """
     if task == SEMANTIC:
         data = decode_segmap(data, nc=19, labels=labels)
+    elif task == 'semantic_with_instance':
+        data = decode_segmap(data, nc=20, labels=labels)
     elif task == INSTANCE_CONTOUR:
         data = decode_segmap(data, nc=9, labels=inst_labels)
     elif task == INSTANCE_REGRESSION:

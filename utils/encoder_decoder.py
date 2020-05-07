@@ -54,6 +54,9 @@ class Encoder_Decoder(nn.Module):
         if self.heads['semantic']['active']:
             self.semantic = get_task_cls(out_planes[-1],
                                          self.heads['semantic']['out_channels'])
+        if self.heads['semantic_with_instance']['active']:
+            self.semantic_with_instance = get_task_cls(out_planes[-1],
+                                                       self.heads['semantic_with_instance']['out_channels'])
         if self.heads['instance_contour']['active']:
             num_classes = self.heads['instance_contour']['out_channels']
             self.edge_decoder = EdgeDNN(in_planes, num_classes)
@@ -79,6 +82,12 @@ class Encoder_Decoder(nn.Module):
             out = F.interpolate(out, scale_factor=4,
                                 mode='bilinear', align_corners=True)
             outputs['semantic'] = out
+        if self.heads['semantic_with_instance']['active']:
+            out = self.semantic_with_instance(class_score)
+            out = F.relu(out, inplace=True)
+            out = F.interpolate(out, scale_factor=4,
+                                mode='bilinear', align_corners=True)
+            outputs['semantic_with_instance'] = out
         if self.heads['instance_contour']['active']:
             outputs['instance_contour'] = self.edge_decoder(
                 intermediate_result)

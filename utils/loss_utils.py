@@ -12,7 +12,7 @@ import pdb
 # TODO:Implement MTL loss combinations
 from utils.loss import cross_entropy2d, huber_loss, mae_loss, mse_loss, \
     weighted_binary_cross_entropy, weighted_binary_cross_entropy_with_nms, \
-    flatten_data, MultiLabelLoss, CrossEntropy2D
+    flatten_data
 
 
 class MultiTaskLoss(nn.Module):
@@ -46,19 +46,15 @@ class MultiTaskLoss(nn.Module):
         for task in self.active_tasks:
             loss_fn = self.cfg[task]['loss']
             if loss_fn == 'cross_entropy2d':
-                self.loss_fn[task] = \
-                    CrossEntropy2D(class_weights=self.weights[task],
-                                   ignore_index=255)
+                self.loss_fn[task] = (cross_entropy2d)
             elif loss_fn == 'weighted_binary_cross_entropy':
-                self.loss_fn[task] = \
-                    MultiLabelLoss(class_weights=self.weights[task])
+                self.loss_fn[task] = (weighted_binary_cross_entropy)
             elif loss_fn == 'weighted_binary_cross_entropy_with_nms':
-                self.loss_fn[task] = \
-                    MultiLabelLoss(class_weights=self.weights[task], nms=True)
+                self.loss_fn[task] = (weighted_binary_cross_entropy)
             elif loss_fn == 'l1':
-                self.loss_fn[task] = nn.L1Loss(reduction='sum')
+                self.loss_fn[task] = mae_loss
             elif loss_fn == 'l2':
-                self.loss_fn[task] = nn.MSELoss(reduction='sum')
+                self.loss_fn[task] = mse_loss
 
     def forward(self, predictions, targets):
         active_tasks = self.get_active_tasks()

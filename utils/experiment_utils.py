@@ -28,8 +28,8 @@ from utils.dataloader import get_dataloaders
 from utils.loss_utils import loss_meters, MultiTaskLoss, averageMeter
 from utils.im_utils import cat_labels, prob_labels, inst_labels, labels
 from utils.writer_utils import add_images_to_writer
-from utils.data_utils import get_labels, get_weights, get_predictions, \
-    post_process_predictions, get_class_weights_from_data
+from utils.data_utils import get_weights, get_class_weights_from_data, \
+    TargetGenerator, get_predictions
 from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
     START_ITER, PLATEAU_COUNT, STATE, GPU_STR, GPU_ID, CPU, PARAMS, MODEL, \
     ENCODER, DECODER, DATA, IM_SIZE, PRETRAINED_PATH, ROOT_PATH, RESULTS_DIR, \
@@ -76,6 +76,7 @@ class ExperimentLoop():
 
         # Load Checkpoint
         self.load_checkpoint()
+        self.model = place_on_multi_gpu(self.cfg, self.model)
 
     def get_config_params(self):
         """Get configuration parameters for the experiment."""
@@ -160,6 +161,8 @@ class ExperimentLoop():
             # _ = get_class_weights_from_data(
             #    self.dataloaders[TRAIN], 9, self.cfg, task=INSTANCE_CONTOUR)
             self.train_running_loss = averageMeter()
+            self.train_generator = TargetGenerator(self.cfg)
+            self.val_generator = TargetGenerator(self.cfg)
             start = time()
             for batch_id, data in enumerate(self.dataloaders[TRAIN]):
                 self.train_step(data, epoch, batch_id)
@@ -173,10 +176,11 @@ class ExperimentLoop():
 
             self.validation_step(epoch)
 
-            if epoch % self.print_interval == 0 and epoch > 0:
-                self.mode == VAL
-                self.validation_step(epoch)
-                self.mode == TRAIN
+            # if epoch % self.print_interval == 0 and epoch > 0:
+            #    self.val_generator = TargetGenerator(self.cfg)
+            #    self.mode == VAL
+            #    self.validation_step(epoch)
+            #    self.mode == TRAIN
 
             self.train_running_loss.reset()
             self.train_loss_meters.reset()
@@ -207,7 +211,8 @@ class ExperimentLoop():
         start = time()
         inputs, targets = data
         inputs = inputs.cuda()
-        labels = get_labels(targets, self.cfg)
+        #labels = get_labels(targets, self.cfg)
+        labels = self.train_generator.generate_targets(targets[0], targets[1])
         loader_s = time() - start
 
         start = time()
@@ -269,10 +274,12 @@ class ExperimentLoop():
                 get_postprocs = True if self.mode == VAL else False
                 start = time()
                 inputs, targets = data
+                inputs = inputs.cuda()
                 self.batch_size = inputs.shape[0]
                 self.sample_idx = np.random.randint(0, self.batch_size, size=1)
 
-                labels = get_labels(targets, self.cfg, get_postprocs)
+                labels = self.val_generator.generate_targets(
+                    targets[0], targets[1])
                 loader_s = time() - start
 
                 start = time()
@@ -568,7 +575,6 @@ def get_model(cfg):
         experiment
     """
     model = get_encoder_decoder(cfg)
-    model = place_on_multi_gpu(cfg, model)
     return model
 
 
@@ -625,7 +631,7 @@ def print_metrics(metrics):
                 t.add_row(['{:05.3f}'.format(score[k] * 100)
                            for k in score.keys()])
                 print(t)
-                if task == SEMANTIC:
+                if task in [SEMANTIC, 'semantic_with_instance']:
                     print_table(class_iou, cat_labels)
                 elif task == INSTANCE_PROBS:
                     print_table(class_iou, prob_labels)
