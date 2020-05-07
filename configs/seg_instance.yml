@@ -15,7 +15,7 @@ model:
     semantic_with_instance:
       active: &semantic_with_instance True
       out_channels: 20
-      loss: cross_entropy2d
+      loss: dualityfocalloss
       loss_weight: 1.0
       metric: classification_metrics
       postproc: argmax
@@ -140,9 +140,9 @@ data:
 
 params:
   savelogs: True
-  batchsize: &batch_size 12
+  batchsize: &batch_size 24
   n_workers: &n_workers 8
-  multigpu: False
+  multigpu: True
   gpu_id: 1
   print_interval: 10
   resume: True
@@ -159,6 +159,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 12
+    batch_size: 24
     shuffle: True
     n_workers: *n_workers

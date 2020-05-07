@@ -12,7 +12,7 @@ import pdb
 # TODO:Implement MTL loss combinations
 from utils.loss import cross_entropy2d, huber_loss, mae_loss, mse_loss, \
     weighted_binary_cross_entropy, weighted_binary_cross_entropy_with_nms, \
-    flatten_data
+    flatten_data, duality_focal_loss
 
 
 class MultiTaskLoss(nn.Module):
@@ -51,6 +51,8 @@ class MultiTaskLoss(nn.Module):
                 self.loss_fn[task] = (weighted_binary_cross_entropy)
             elif loss_fn == 'weighted_binary_cross_entropy_with_nms':
                 self.loss_fn[task] = (weighted_binary_cross_entropy)
+            elif loss_fn == 'dualityfocalloss':
+                self.loss_fn[task] = (duality_focal_loss)
             elif loss_fn == 'l1':
                 self.loss_fn[task] = mae_loss
             elif loss_fn == 'l2':
@@ -59,9 +61,12 @@ class MultiTaskLoss(nn.Module):
     def forward(self, predictions, targets):
         active_tasks = self.get_active_tasks()
         # sigma = self.get_sigma(active_tasks)
+
         for task in active_tasks:
+            weights = self.weights[task].cuda()
             self.losses[task] = \
-                self.loss_fn[task](predictions[task], targets[task])
+                self.loss_fn[task](predictions[task],
+                                   targets[task], weights)
 
         total_loss = self.compute_total_loss()
         return self.losses, total_loss

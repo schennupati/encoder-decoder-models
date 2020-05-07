@@ -107,7 +107,7 @@ class TargetGenerator():
                     id2label[value].trainId
 
             n = self.instance_cnt.shape[0]
-            kernel = np.ones((3, 3), np.uint8)
+            kernel = np.ones((2, 2), np.uint8)
             for i in range(n):
                 img = self.instance_cnt[i, ...].astype(np.uint8)
                 self.instance_cnt[i, ...] = cv2.dilate(img, kernel,
@@ -245,7 +245,7 @@ def cityscapes_semantic_weights(num_classes):
                          47.33397232867321, 11.610673599796504,
                          44.60042610251128, 45.23705196392834,
                          45.28288297518183, 48.14776939659858,
-                         41.924631833506794, 1000]
+                         41.924631833506794, 60]
 
     elif num_classes == 19:
         class_weights = [3.045383480249677, 12.862127312658735,
@@ -272,7 +272,8 @@ def get_weights(cfg):
     tasks = cfg['model']['outputs']
     weights = {}
     for task in tasks.keys():
-        if dataset == 'Cityscapes' and task == 'semantic':
+        if dataset == 'Cityscapes' and task in ['semantic',
+                                                'semantic_with_instance']:
             weight = cityscapes_semantic_weights(tasks[task]['out_channels'])
             weights[task] = torch.FloatTensor(weight)
         else:

@@ -14,8 +14,9 @@ import numpy as np
 import time
 import logging
 from kornia.filters import spatial_gradient, filter2D
+from torch.autograd import Variable
 
-from models import StealNMSLoss
+
 from utils.constants import LENGTH
 
 
@@ -47,11 +48,47 @@ def cross_entropy2d(input, target, weights=None, size_average=True):
     target = target.long()
     loss = F.cross_entropy(input, target,
                            weight=weights, ignore_index=255)
+
     return loss
 
 
+def duality_loss(input, target, weights=None, size_average=True):
+    argmax_preds = torch.argmax(input, dim=1)
+    cnt_targets_mask = (target == 19).float()
+    input, target = flatten_data(input, target)
+    target = target.long()
+    ce_loss = F.cross_entropy(input, target,
+                              weight=weights, ignore_index=255)
+    cnt_pred_mask = (argmax_preds == 19).float()
+    l2_loss = F.mse_loss(cnt_pred_mask, cnt_targets_mask)
+    # logging.info('ce_loss: {} l2_loss: {}'.format(ce_loss, l2_loss))
+    return ce_loss + 50*l2_loss
+
+
+def duality_focal_loss(input, target, weights=None, gamma=1,
+                       size_average=True):
+    n, c, h, w = input.size()
+    argmax_preds = torch.argmax(input, dim=1)
+    softmax_preds = F.softmax(input, dim=1).permute(
+        0, 2, 3, 1).contiguous().view(-1, c)
+    cnt_targets_mask = (target == 19).float()
+    input, target = flatten_data(input, target)
+    target = target.long()
+    ce_loss = F.cross_entropy(input, target, weight=weights,
+                              ignore_index=255, reduction='none')
+    cnt_pred_mask = (argmax_preds == 19).float()
+    l2_loss = F.mse_loss(cnt_pred_mask, cnt_targets_mask)
+    target = target * (target != 255).long()
+    softmax_preds = torch.gather(softmax_preds, 1, target.unsqueeze(1))
+    focal_loss = ((1 - softmax_preds)**gamma).squeeze() * ce_loss
+    focal_loss = focal_loss.mean()
+    # logging.info(
+    #     'focal_loss: {}, ce_loss: {}, l2_loss: {}'.format(focal_loss, ce_loss.mean(), l2_loss))
+    return focal_loss + 50*l2_loss
+
+
 def weighted_binary_cross_entropy(input, target, weights=None):
-    #input, target = flatten_data(input, target)
+    # input, target = flatten_data(input, target)
     n_classes = input.shape[1]
     mean_loss = 0.0
     for class_id in range(n_classes):
@@ -200,8 +237,8 @@ def get_filter_dict(r=2):
     vert[:, r-1] = 1
     filter_dict['vertical'] = vert.unsqueeze(0)
     filter_dict['lead_diag'] = torch.eye(2*r-1).unsqueeze_(0)
-    filter_dict['cnt_diag'] = \
-        torch.flip(torch.eye(2*r-1), dims=(0,)).unsqueeze(0)
+    filter_dict['cnt_diag'] = torch.flip(
+        torch.eye(2*r-1), dims=(0,)).unsqueeze(0)
     return filter_dict
 
 
