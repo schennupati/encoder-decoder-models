@@ -30,6 +30,7 @@ class TargetGenerator():
         if 'semantic_with_instance' in self.tasks:
             self.semantic_cnt = np.zeros_like(inst)
             self.instance_cnt = np.zeros_like(inst)
+            self.touching_cnt = np.zeros_like(inst)
         if ('panoptic' in self.tasks) or self.postprocs:
             self.panoptic_seg = np.zeros((inst.shape + (3,)), dtype=np.uint8)
             self.segmInfo = []
@@ -47,8 +48,8 @@ class TargetGenerator():
             self.labels.update(
                 {'semantic_with_instance':
                  torch.tensor(self.semantic_seg).cuda(),
-                 'instance_contour':
-                 torch.tensor(self.instance_cnt).cuda()})
+                 'touching_boundaries':
+                 torch.tensor(self.touching_cnt).cuda()})
         if ('panoptic' in self.tasks) or self.postprocs:
             self.labels.update(
                 {'panoptic': self.panoptic_seg,
@@ -100,9 +101,10 @@ class TargetGenerator():
                                                       categoryId, isCrowd))
         if 'semantic_with_instance' in self.tasks:
             for value in np.unique(self.semantic_seg):
-                self.semantic_cnt = get_contours(self.semantic_cnt,
-                                                 self.semantic_seg,
-                                                 value)
+                if id2label[value].hasInstances:
+                    self.semantic_cnt = get_contours(self.semantic_cnt,
+                                                     self.semantic_seg,
+                                                     value)
                 self.semantic_seg[self.semantic_seg == value] = \
                     id2label[value].trainId
 
@@ -115,6 +117,9 @@ class TargetGenerator():
 
             self.semantic_seg[self.instance_cnt != 0] = \
                 name2label['boundary'].trainId
+            self.touching_cnt = self.instance_cnt-self.semantic_cnt
+            self.touching_cnt[self.touching_cnt != 0] = 10
+            self.touching_cnt[self.touching_cnt == 0] = 1
 
         # fig, axis = plt.subplots(2, 2)
         # axis[0, 0].imshow(self.instance_cnt[0])

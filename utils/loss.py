@@ -52,7 +52,8 @@ def cross_entropy2d(input, target, weights=None, size_average=True):
     return loss
 
 
-def duality_loss(input, target, weights=None, size_average=True):
+def duality_loss(input, target, weights=None, sample_weight=None,
+                 size_average=True):
     argmax_preds = torch.argmax(input, dim=1)
     cnt_targets_mask = (target == 19).float()
     input, target = flatten_data(input, target)
@@ -65,8 +66,8 @@ def duality_loss(input, target, weights=None, size_average=True):
     return ce_loss + 50*l2_loss
 
 
-def duality_focal_loss(input, target, weights=None, gamma=1,
-                       size_average=True):
+def duality_focal_loss(input, target, weights=None, sample_weight=None,
+                       gamma=1, size_average=True):
     n, c, h, w = input.size()
     argmax_preds = torch.argmax(input, dim=1)
     softmax_preds = F.softmax(input, dim=1).permute(
@@ -74,17 +75,17 @@ def duality_focal_loss(input, target, weights=None, gamma=1,
     cnt_targets_mask = (target == 19).float()
     input, target = flatten_data(input, target)
     target = target.long()
-    ce_loss = F.cross_entropy(input, target, weight=weights,
+    ce_loss = F.cross_entropy(input, target, weight=None,
                               ignore_index=255, reduction='none')
     cnt_pred_mask = (argmax_preds == 19).float()
     l2_loss = F.mse_loss(cnt_pred_mask, cnt_targets_mask)
     target = target * (target != 255).long()
     softmax_preds = torch.gather(softmax_preds, 1, target.unsqueeze(1))
     focal_loss = ((1 - softmax_preds)**gamma).squeeze() * ce_loss
-    focal_loss = focal_loss.mean()
+    #focal_loss = focal_loss*(sample_weight.view(-1, 1).squeeze())
     # logging.info(
     #     'focal_loss: {}, ce_loss: {}, l2_loss: {}'.format(focal_loss, ce_loss.mean(), l2_loss))
-    return focal_loss + 50*l2_loss
+    return focal_loss.mean() + 20*l2_loss
 
 
 def weighted_binary_cross_entropy(input, target, weights=None):
