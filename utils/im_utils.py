@@ -82,7 +82,8 @@ labels = [
     Label('motorcycle', 32, 17, 'vehicle', 7, True, False, (0,  0, 230)),
     Label('bicycle', 33, 18, 'vehicle', 7, True, False, (119, 11, 32)),
     Label('license plate', 34,  -1, 'vehicle', 7, False, True, (0, 0, 142)),
-    Label('boundary', 35, 19, 'vehicle', 7, False, False, (255, 255, 0))]
+    Label('boundary', 35, 19, 'vehicle', 7, False, False, (255, 255, 0)),
+    Label('t-boundary', 36, 20, 'vehicle', 7, False, False, (255, 0, 255))]
 
 inst_labels = [
     Label('unlabeled', 0, 0, 'void', 0, False, True, (255, 255, 255)),
@@ -116,7 +117,8 @@ cat_labels = [
     Label('train', 16, 16, 'vehicle', 7, True, False, (0, 80, 100)),
     Label('motorcycle', 17, 17, 'vehicle', 7, True, False, (0,  0, 230)),
     Label('bicycle', 18, 18, 'vehicle', 7, True, False, (119, 11, 32)),
-    Label('boundary', 19, 19, 'vehicle', 7, False, False, (255, 255, 0))]
+    Label('boundary', 19, 19, 'vehicle', 7, False, False, (255, 255, 0)),
+    Label('t-boundary', 36, 20, 'vehicle', 7, False, False, (255, 0, 255))]
 
 prob_labels = [
     Label('stuff',  0, 0, 'flat', 1, False, False, (255, 255, 255)),
@@ -129,7 +131,7 @@ def get_trainId(id, labels=labels):
             return i
 
 
-def decode_segmap(image, nc=20, labels=labels):
+def decode_segmap(image, nc=21, labels=labels):
 
     r = np.zeros_like(image).astype(np.uint8)
     g = np.zeros_like(image).astype(np.uint8)

@@ -8,6 +8,7 @@ from models.fcn import FCN
 from models.fpn import FPN
 from models.hed import EdgeDNN
 from models.steal import StealNMSLoss
+from models.deeplabv3 import DeepLabv3
 
 
 encoder_fn = {'resnet18': (resnet18), 'resnet34': (resnet34),

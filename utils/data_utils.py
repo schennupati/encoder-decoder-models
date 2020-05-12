@@ -118,6 +118,8 @@ class TargetGenerator():
             self.semantic_seg[self.instance_cnt != 0] = \
                 name2label['boundary'].trainId
             self.touching_cnt = self.instance_cnt-self.semantic_cnt
+            self.semantic_seg[self.touching_cnt != 0] = \
+                name2label['t-boundary'].trainId
             self.touching_cnt[self.touching_cnt != 0] = 10
             self.touching_cnt[self.touching_cnt == 0] = 1
 
@@ -240,7 +242,7 @@ def get_class_weights_from_data(loader, num_classes, cfg, task):
 
 
 def cityscapes_semantic_weights(num_classes):
-    if num_classes == 20:
+    if num_classes == 21:
         class_weights = [3.045383480249677, 12.862127312658735,
                          4.509888876996228, 38.15694593009221,
                          35.25278401818165, 31.48260832348194,
@@ -250,7 +252,7 @@ def cityscapes_semantic_weights(num_classes):
                          47.33397232867321, 11.610673599796504,
                          44.60042610251128, 45.23705196392834,
                          45.28288297518183, 48.14776939659858,
-                         41.924631833506794, 60]
+                         41.924631833506794, 50, 60]
 
     elif num_classes == 19:
         class_weights = [3.045383480249677, 12.862127312658735,

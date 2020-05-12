@@ -1,6 +1,6 @@
-import torch
-import torch.nn as nn
 from .utils import load_state_dict_from_url
+import torch.nn as nn
+import torch
 
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
@@ -214,27 +214,39 @@ class ResNet(nn.Module):
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
-        down_sampled_2 = self.relu(x)
-        x = self.maxpool(down_sampled_2)
-
-        down_sampled_4 = self.layer1(x)
-        down_sampled_8 = self.layer2(down_sampled_4)
-        down_sampled_16 = self.layer3(down_sampled_8)
-        down_sampled_32 = self.layer4(down_sampled_16)
-
-        out = self.avgpool(down_sampled_32)
-        out = torch.flatten(out, 1)
-        out = self.fc(out)
-
-        intermed = [down_sampled_2,
-                    down_sampled_4,
-                    down_sampled_8,
-                    down_sampled_16,
-                    down_sampled_32]
         if self.multiscale:
+            down_sampled_2 = self.relu(x)
+            x = self.maxpool(down_sampled_2)
+
+            down_sampled_4 = self.layer1(x)
+            down_sampled_8 = self.layer2(down_sampled_4)
+            down_sampled_16 = self.layer3(down_sampled_8)
+            down_sampled_32 = self.layer4(down_sampled_16)
+
+            out = self.avgpool(down_sampled_32)
+            out = torch.flatten(out, 1)
+            out = self.fc(out)
+
+            intermed = [down_sampled_2,
+                        down_sampled_4,
+                        down_sampled_8,
+                        down_sampled_16,
+                        down_sampled_32]
             return out, intermed
         else:
-            return out
+            x = self.relu(x)
+            x = self.maxpool(x)
+
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+
+            out = self.avgpool(x)
+            out = torch.flatten(out, 1)
+            out = self.fc(out)
+
+            return out, x
 
 
 def _resnet(arch, multiscale, block, layers, pretrained, progress, **kwargs):

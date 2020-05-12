@@ -10,9 +10,9 @@ from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Variable
 
-from models import FCN, FPN, EdgeDNN, encoder_fn
+from models import FCN, FPN, EdgeDNN, DeepLabv3, encoder_fn
 
-decoder_map = {'fcn': (FCN), 'fpn': (FPN)}
+decoder_map = {'fcn': (FCN), 'fpn': (FPN), 'DeepLabv3': (DeepLabv3)}
 
 
 def get_encoder_decoder(cfg, pretrained_backbone=True):
@@ -20,16 +20,24 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     encoder_name = cfg['model']['encoder']
     decoder_name = cfg['model']['decoder']
     tasks = cfg['tasks']
+    if 'DeepLab' in decoder_name and 'resnet' in encoder_name:
+        encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
+                                           progress=True,
+                                           replace_stride_with_dilation=[True,
+                                                                         True,
+                                                                         True])
+        in_planes = list(encoder.in_planes_map.values())[-1]
+        out_planes = [in_planes//8]
 
-    encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
-                                       progress=True, multiscale=True)
-
-    in_planes = list(encoder.in_planes_map.values())
-    in_planes.reverse()
-    if encoder_name in ['resnet18', ['resnet34']]:
-        out_planes = in_planes[1:3]
     else:
-        out_planes = [planes//4 for planes in in_planes[:2]]
+        encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
+                                           progress=True, multiscale=True)
+        in_planes = list(encoder.in_planes_map.values())
+        in_planes.reverse()
+        if encoder_name in ['resnet18', ['resnet34']]:
+            out_planes = in_planes[1:3]
+        else:
+            out_planes = [planes//4 for planes in in_planes[:2]]
 
     model = Encoder_Decoder(encoder, decoder_map[decoder_name], cfg,
                             in_planes=in_planes, out_planes=out_planes)
@@ -70,22 +78,22 @@ class Encoder_Decoder(nn.Module):
             self.instance_probs = get_task_cls(out_planes[-1],
                                                self.heads['instance_probs']['out_channels'])
 
-    def forward(self, x):
+    def forward(self, input):
         outputs = {}
-        x, intermediate_result = self.encoder(x)
+        _, intermediate_result = self.encoder(input)
         class_score, _ = self.class_decoder(intermediate_result)
-
+        size = input.shape[-2:]
         # reg_score, _ = self.reg_decoder(intermediate_result)
         if self.heads['semantic']['active']:
             out = self.semantic(class_score)
             out = F.relu(out, inplace=True)
-            out = F.interpolate(out, scale_factor=4,
+            out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['semantic'] = out
         if self.heads['semantic_with_instance']['active']:
             out = self.semantic_with_instance(class_score)
             out = F.relu(out, inplace=True)
-            out = F.interpolate(out, scale_factor=4,
+            out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['semantic_with_instance'] = out
         if self.heads['instance_contour']['active']:
@@ -93,18 +101,18 @@ class Encoder_Decoder(nn.Module):
                 intermediate_result)
         if self.heads['instance_regression']['active']:
             out = self.instance_regression(reg_score)
-            out = F.interpolate(out, scale_factor=4,
+            out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['instance_regression'] = out
         if self.heads['instance_heatmap']['active']:
             out = self.instance_heatmap(reg_score)
-            out = F.interpolate(out, scale_factor=4,
+            out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['instance_heatmap'] = out
         if self.heads['instance_probs']['active']:
             out = self.instance_probs(class_score)
             out = F.relu(out, inplace=True)
-            out = F.interpolate(out, scale_factor=4,
+            out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['instance_probs'] = out
 

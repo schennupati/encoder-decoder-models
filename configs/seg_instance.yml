@@ -1,7 +1,7 @@
 model:
   arch: encoder_decoder # Shared encoder and independent decoders
   encoder: resnet50
-  decoder: fpn
+  decoder: DeepLabv3 #fpn or DeepLabv3
   pretrained_path: /home/sumche/results
   loss_fn: fixed # fixed, uncertainty etc
   outputs:
@@ -14,7 +14,7 @@ model:
       postproc: argmax
     semantic_with_instance:
       active: &semantic_with_instance True
-      out_channels: 20
+      out_channels: 21
       loss: dualityfocalloss
       loss_weight: 1.0
       metric: classification_metrics
