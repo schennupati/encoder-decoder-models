@@ -75,8 +75,8 @@ class ExperimentLoop():
         self.get_losses_and_metrics()
 
         # Load Checkpoint
-        self.load_checkpoint()
         self.model = place_on_multi_gpu(self.cfg, self.model)
+        self.load_checkpoint()
 
     def get_config_params(self):
         """Get configuration parameters for the experiment."""
@@ -86,12 +86,14 @@ class ExperimentLoop():
         self.epochs = params[EPOCHS]
         self.patience = params[PATIENCE]
         self.early_stop = params[EARLY_STOP]
+        self.save_criteria = params['save_criteria']
         self.print_interval = params[PRINT_INTERVAL]
         self.resume_training = params[RESUME]
         self.exp_dir, _, _ = get_exp_dir(cfg)
         self.plateau_count = 0
         self.start_iter = 0
         self.best_loss = MILLION
+        self.best_metric = 0
 
     def get_criterion(self):
         """Get criterion for the current experiment."""
@@ -137,9 +139,14 @@ class ExperimentLoop():
             self.criterion.load_state_dict(checkpoint[CRITERION_STATE])
             self.start_iter = checkpoint[EPOCH]
             self.best_loss = checkpoint[BEST_LOSS]
-            logging.info("Loaded checkpoint {} from epoch {} with loss {}"
+            self.best_metric = checkpoint.get('best_metrics', 0)
+            logging.info("""Loaded checkpoint {} from epoch {} with loss {} and metric {}"""
                          .format(checkpoint_name, self.start_iter,
-                                 self.best_loss))
+                                 self.best_loss, self.best_metric))
+            for state in self.optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.cuda()
         else:
             if self.mode == TRAIN:
                 logging.info("Begining Training from Scratch")
@@ -153,7 +160,7 @@ class ExperimentLoop():
             logging.info(TRAIN_STR.center(LENGTH, '='))
             self.loss_weights = self.criterion.module.sigma \
                 if self.cfg[PARAMS][MULTIGPU] else self.criterion.sigma
-            #self.loss_weights =  self.criterion.sigma
+            # self.loss_weights =  self.criterion.sigma
             logging.info('MTL Loss type: {}, Loss weights: {}'.
                          format(self.cfg[MODEL][LOSS_FN], self.loss_weights)
                          .center(LENGTH, '='))
@@ -211,7 +218,7 @@ class ExperimentLoop():
         start = time()
         inputs, targets = data
         inputs = inputs.cuda()
-        #labels = get_labels(targets, self.cfg)
+        # labels = get_labels(targets, self.cfg)
         labels = self.train_generator.generate_targets(targets[0], targets[1])
         loader_s = time() - start
 
@@ -348,10 +355,13 @@ class ExperimentLoop():
         print_metrics(self.val_metrics)
         if self.mode == VAL:
             print_metrics(self.post_proc_metrics)
+        self.val_loss = running_val_loss.avg
+        val_metric = self.val_metrics.metrics
+        tasks = list(self.val_loss_meters.meters.keys())
+        self.val_metric = val_metric[tasks[0]].get_scores()[0]['Mean IoU']*100
         self.val_loss_meters.reset()
         self.val_metrics.reset()
         self.post_proc_metrics.reset()
-        self.val_loss = running_val_loss.avg
         running_val_loss.reset()
 
     def send_predictions_to_writer(self, inputs, predictions, labels, meters,
@@ -375,14 +385,21 @@ class ExperimentLoop():
 
         Arguments:
             epoch {[int]} -- [Current epoch number]
+
         """
-        if self.val_loss <= self.best_loss:
+        if self.save_criteria == 'loss':
+            save = (self.val_loss <= self.best_loss)
+        elif self.save_criteria == 'metric':
+            save = (self.val_metric >= self.best_metric)
+        if save:
             self.best_loss = self.val_loss
+            self.best_metric = self.val_metric
             self.state = {"epoch": self.start_iter + epoch + 1,
                           "model_state": self.model.state_dict(),
                           "criterion_state": self.criterion.state_dict(),
                           "optimizer_state": self.optimizer.state_dict(),
-                          "best_loss": self.best_loss}
+                          "best_loss": self.best_loss,
+                          "best_metrics": self.best_metric}
             save_path, _, _, time_stamp = get_save_path(self.cfg,
                                                         self.best_loss)
             torch.save(self.state, save_path)
@@ -397,10 +414,16 @@ class ExperimentLoop():
                 self.plateau_count = 0
         else:
             self.plateau_count += 1
-            logging.info("""Best Loss: {}. Current Loss: {}. /
-                          No Checkpoint saved. Plateau_count: {}/{}"""
-                         .format(self.best_loss, self.val_loss,
-                                 self.plateau_count, self.patience))
+            if self.save_criteria == 'loss':
+                logging.info("""Best Loss: {}. Current Loss: {}. /
+                              No Checkpoint saved. Plateau_count: {}/{}"""
+                             .format(self.best_loss, self.val_loss,
+                                     self.plateau_count, self.patience))
+            elif self.save_criteria == 'metric':
+                logging.info("""Best Metric Score: {}. Current Metric Score: {}
+                             . No Checkpoint saved. Plateau_count: {}/{}""".
+                             format(self.best_metric, self.val_metric,
+                                    self.plateau_count, self.patience))
 
     def stop_training(self, epoch):
         """Stop training if stop criteria is met.

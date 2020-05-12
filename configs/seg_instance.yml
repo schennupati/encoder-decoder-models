@@ -147,6 +147,7 @@ params:
   print_interval: 10
   resume: True
   early_stop: True
+  save_criteria: metric
   patience: 25
   epochs: 100
   train:
