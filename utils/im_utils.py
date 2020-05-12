@@ -82,8 +82,8 @@ labels = [
     Label('motorcycle', 32, 17, 'vehicle', 7, True, False, (0,  0, 230)),
     Label('bicycle', 33, 18, 'vehicle', 7, True, False, (119, 11, 32)),
     Label('license plate', 34,  -1, 'vehicle', 7, False, True, (0, 0, 142)),
-    Label('boundary', 35, 19, 'vehicle', 7, False, False, (255, 255, 0)),
-    Label('t-boundary', 36, 20, 'vehicle', 7, False, False, (255, 0, 255))]
+    Label('boundary', 35, 19, 'vehicle', 7, False, False, (255, 0, 255)),
+    Label('t-boundary', 36, 20, 'vehicle', 7, False, False, (255, 255, 0))]
 
 inst_labels = [
     Label('unlabeled', 0, 0, 'void', 0, False, True, (255, 255, 255)),
@@ -117,8 +117,8 @@ cat_labels = [
     Label('train', 16, 16, 'vehicle', 7, True, False, (0, 80, 100)),
     Label('motorcycle', 17, 17, 'vehicle', 7, True, False, (0,  0, 230)),
     Label('bicycle', 18, 18, 'vehicle', 7, True, False, (119, 11, 32)),
-    Label('boundary', 19, 19, 'vehicle', 7, False, False, (255, 255, 0)),
-    Label('t-boundary', 36, 20, 'vehicle', 7, False, False, (255, 0, 255))]
+    Label('boundary', 19, 19, 'vehicle', 7, False, False, (255, 0, 255)),
+    Label('t-boundary', 20, 20, 'vehicle', 7, False, False, (255, 255, 0))]
 
 prob_labels = [
     Label('stuff',  0, 0, 'flat', 1, False, False, (255, 255, 255)),
@@ -167,7 +167,8 @@ trainId2label = {label.trainId: label for label in reversed(labels)}
 # category to list of label objects
 category2labels = {}
 # Color to panoptic ID
-panid2label = { l.color[0]+ 256*l.color[1]+ 256*256*l.color[2] : l for l in labels }
+panid2label = {l.color[0] + 256*l.color[1] +
+               256*256*l.color[2]: l for l in labels}
 
 
 for label in labels:

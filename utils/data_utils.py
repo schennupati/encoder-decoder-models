@@ -108,12 +108,12 @@ class TargetGenerator():
                 self.semantic_seg[self.semantic_seg == value] = \
                     id2label[value].trainId
 
-            n = self.instance_cnt.shape[0]
-            kernel = np.ones((2, 2), np.uint8)
-            for i in range(n):
-                img = self.instance_cnt[i, ...].astype(np.uint8)
-                self.instance_cnt[i, ...] = cv2.dilate(img, kernel,
-                                                       iterations=1)
+            # n = self.instance_cnt.shape[0]
+            # kernel = np.ones((2, 2), np.uint8)
+            # for i in range(n):
+            #     img = self.instance_cnt[i, ...].astype(np.uint8)
+            #     self.instance_cnt[i, ...] = cv2.dilate(img, kernel,
+            #                                            iterations=1)
 
             self.semantic_seg[self.instance_cnt != 0] = \
                 name2label['boundary'].trainId
@@ -149,11 +149,14 @@ def get_contours(img, inst, segmentId):
 
 
 def get_contour_img(img, mask):
+    kernel = np.ones((2, 2), np.uint8)
     mask = mask.numpy() if torch.is_tensor(mask) else mask
     mask = mask.astype(np.uint8)
     cnts, _ = cv2.findContours(mask,
                                cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    return cv2.drawContours(img, cnts, -1, 1, 1)
+    img = cv2.drawContours(img, cnts, -1, 1, 2)  # .astype(np.uint8)
+    # img =cv2.dilate(img, kernel, iterations=1)
+    return img
 
 
 def get_segment_info(mask, segmentId, categoryId, isCrowd):

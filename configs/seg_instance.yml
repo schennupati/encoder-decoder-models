@@ -1,7 +1,7 @@
 model:
   arch: encoder_decoder # Shared encoder and independent decoders
   encoder: resnet50
-  decoder: DeepLabv3 #fpn or DeepLabv3
+  decoder: fpn #fpn or DeepLabv3
   pretrained_path: /home/sumche/results
   loss_fn: fixed # fixed, uncertainty etc
   outputs:
