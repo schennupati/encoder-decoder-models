@@ -7,7 +7,8 @@ Created on Fri Sep 13 11:02:38 2019
 """
 import torch.nn as nn
 
-def get_activation(activation,inplace=True):
+
+def get_activation(activation, inplace=True):
     if activation == 'ELU':
         return nn.ELU(alpha=1.0, inplace=inplace)
     elif activation == 'LeakyReLU':

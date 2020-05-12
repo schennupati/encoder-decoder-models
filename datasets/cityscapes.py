@@ -203,14 +203,6 @@ class Cityscapes(VisionDataset):
         with open(path, 'r') as file:
             data = json.load(file)
         return data
-    
-    def _load_npz(self,path, upscale=True):
-        im_array = np.load(path)['arr_0']
-        if upscale:
-            im = Image.fromarray(np.uint8(im_array*255.0))
-        else:
-            im = Image.fromarray(np.uint8(im_array))
-        return im
 
     def _get_target_suffix(self, mode, target_type):
         if target_type == 'instance':
