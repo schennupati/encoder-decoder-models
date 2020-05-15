@@ -63,16 +63,22 @@ class MultiTaskLoss(nn.Module):
         # sigma = self.get_sigma(active_tasks)
 
         for task in active_tasks:
-            weights = self.weights[task].cuda()
-            if task != 'semantic_with_instance':
+            if self.weights[task] is not None:
+                weights = self.weights[task].cuda()
+
+            if task in ['instance_regression', 'bounding_box']:
                 self.losses[task] = \
                     self.loss_fn[task](predictions[task],
-                                       targets[task], weights)
-            else:
+                                       targets[task]['targets'],
+                                       targets[task]['loss_mask'])
+            elif task == 'semantic_with_instance':
                 self.losses[task] = \
                     self.loss_fn[task](predictions[task],
                                        targets[task], weights,
                                        targets['touching_boundaries'])
+            else:
+                self.losses[task] = self.loss_fn[task](predictions[task],
+                                                       targets[task], weights)
 
         total_loss = self.compute_total_loss()
         return self.losses, total_loss

@@ -71,6 +71,9 @@ class Encoder_Decoder(nn.Module):
         if self.heads['instance_regression']['active']:
             self.instance_regression = get_task_cls(out_planes[-1],
                                                     self.heads['instance_regression']['out_channels'])
+        if self.heads['bounding_box']['active']:
+            self.bounding_box = get_task_cls(out_planes[-1],
+                                             self.heads['bounding_box']['out_channels'])
         if self.heads['instance_heatmap']['active']:
             self.instance_heatmap = get_task_cls(out_planes[-1],
                                                  self.heads['instance_heatmap']['out_channels'])
@@ -83,7 +86,7 @@ class Encoder_Decoder(nn.Module):
         _, intermediate_result = self.encoder(input)
         class_score, _ = self.class_decoder(intermediate_result)
         size = input.shape[-2:]
-        # reg_score, _ = self.reg_decoder(intermediate_result)
+        #reg_score, _ = self.reg_decoder(intermediate_result)
         if self.heads['semantic']['active']:
             out = self.semantic(class_score)
             out = F.relu(out, inplace=True)
@@ -100,10 +103,17 @@ class Encoder_Decoder(nn.Module):
             outputs['instance_contour'] = self.edge_decoder(
                 intermediate_result)
         if self.heads['instance_regression']['active']:
-            out = self.instance_regression(reg_score)
+            out = self.instance_regression(class_score)
             out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['instance_regression'] = out
+        if self.heads['bounding_box']['active']:
+            scale_factor = 4*self.heads['bounding_box']['scale_factor']
+            out = self.bounding_box(class_score)
+            out = F.relu(out, inplace=True)
+            out = F.interpolate(out, scale_factor=scale_factor,
+                                mode='bilinear', align_corners=True)
+            outputs['bounding_box'] = out
         if self.heads['instance_heatmap']['active']:
             out = self.instance_heatmap(reg_score)
             out = F.interpolate(out, size=size,

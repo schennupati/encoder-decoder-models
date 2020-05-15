@@ -63,6 +63,7 @@ def get_total_files_count(path, ext='.png'):
 annotations_count = get_total_files_count(
     path_to_annotations, 'instanceIds.png')
 
+
 def convert_centroids(centroids, op='normalize', stride=1):
 
     #converted_centroid_regression = torch.zeros_like(centroids) if tensor else np.zeros_like(centroids)

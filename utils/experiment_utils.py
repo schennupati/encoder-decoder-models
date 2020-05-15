@@ -94,6 +94,7 @@ class ExperimentLoop():
         self.start_iter = 0
         self.best_loss = MILLION
         self.best_metric = 0
+        self.scale_factor = cfg[MODEL][OUTPUTS]['bounding_box']['scale_factor']
 
     def get_criterion(self):
         """Get criterion for the current experiment."""
@@ -254,7 +255,8 @@ class ExperimentLoop():
         if batch == 0:
             self.send_predictions_to_writer(inputs, predictions, labels,
                                             self.train_loss_meters, epoch,
-                                            TRAIN)
+                                            TRAIN,
+                                            scale_factor=self.scale_factor)
         if batch % self.print_interval == 0 or batch == self.n_batches:
             writer_s = time() - start
             postproc_s = 0.0
@@ -324,10 +326,12 @@ class ExperimentLoop():
                     self.send_predictions_to_writer(inputs, predictions,
                                                     labels,
                                                     self.val_loss_meters, i,
-                                                    VAL, save_to_disk=True)
+                                                    VAL, save_to_disk=True,
+                                                    scale_factor=self.scale_factor)
                     self.send_outputs_to_writer(outputs, labels,
                                                 self.post_proc_metrics, i, VAL,
-                                                save_to_disk=True)
+                                                save_to_disk=True,
+                                                scale_factor=self.scale_factor)
                     writer_s = time() - start
                 # break
                 val_s = loader_s + forward_s + backward_s + \
@@ -348,7 +352,8 @@ class ExperimentLoop():
                                        loss.avg.mean(), epoch)
                 self.send_predictions_to_writer(inputs, predictions,
                                                 labels, self.val_loss_meters,
-                                                epoch, VAL)
+                                                epoch, VAL,
+                                                scale_factor=self.scale_factor)
             writer_s = time() - start
             logging.info(loss_str + 'Time: {:05.3f}'.format(time()-val_start))
 
@@ -365,20 +370,24 @@ class ExperimentLoop():
         running_val_loss.reset()
 
     def send_predictions_to_writer(self, inputs, predictions, labels, meters,
-                                   epoch=1, state=VAL, save_to_disk=False):
+                                   epoch=1, state=VAL, save_to_disk=False,
+                                   scale_factor=0.25):
         for task in meters.meters.keys():
             add_images_to_writer(inputs, predictions[task], labels[task],
                                  self.writer, epoch, task, state=state,
                                  sample_idx=self.sample_idx,
-                                 save_to_disk=save_to_disk)
+                                 save_to_disk=save_to_disk,
+                                 scale_factor=scale_factor)
 
     def send_outputs_to_writer(self, outputs, labels, metrics, epoch=1,
-                               state=VAL, save_to_disk=False):
+                               state=VAL, save_to_disk=False,
+                               scale_factor=0.25):
         for task in metrics.metrics.keys():
             add_images_to_writer(None, outputs[task], labels[task],
                                  self.writer, epoch, task, state=state,
                                  sample_idx=self.sample_idx,
-                                 save_to_disk=save_to_disk)
+                                 save_to_disk=save_to_disk,
+                                 scale_factor=scale_factor)
 
     def save_model(self, epoch):
         """Save model to checkpoint.
@@ -458,15 +467,17 @@ def get_exp_dir(cfg):
     encoder_name = cfg[MODEL][ENCODER]
     decoder_name = cfg[MODEL][DECODER]
     imsize = cfg[DATA][IM_SIZE]
-    base_dir = cfg[MODEL][PRETRAINED_PATH]
-
-    # create results directory if it's not specified in cfg.
-    if base_dir is None:
-        base_dir = RESULTS_DIR
-
     network_name = EXPERIMENT_NAME.format(encoder_name=encoder_name,
                                           decoder_name=decoder_name,
                                           imsize=imsize)
+    if cfg['experiment_name'] != 'None':
+        network_name = cfg['experiment_name'] + '_' + network_name
+
+    # create results directory if it's not specified in cfg.
+    base_dir = cfg[MODEL][PRETRAINED_PATH]
+    if base_dir is None:
+        base_dir = RESULTS_DIR
+
     exp_name = '_'.join(cfg[TASKS].keys())
 
     # create experiment directory based on tasks and network type.

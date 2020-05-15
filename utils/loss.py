@@ -85,10 +85,11 @@ def duality_focal_loss(input, target, weights=None, sample_weight=None,
     target = target * (target != 255).long()
     softmax_preds = torch.gather(softmax_preds, 1, target.unsqueeze(1))
     focal_loss = ((1 - softmax_preds)**gamma).squeeze() * ce_loss
-    #focal_loss = focal_loss*(sample_weight.view(-1, 1).squeeze())
+    # focal_loss = focal_loss*(sample_weight.view(-1, 1).squeeze())
     # logging.info(
     #     'focal_loss: {}, ce_loss: {}, l2_loss: {}'.format(focal_loss, ce_loss.mean(), l2_loss))
-    return focal_loss.mean() + 10*l2_loss_seg_cnt + 1e3*l2_loss_inst_cnt
+    # focal_loss.mean() + 10*l2_loss_seg_cnt + 1e3*l2_loss_inst_cnt
+    return focal_loss.mean() + 100*l2_loss_inst_cnt
 
 
 def weighted_binary_cross_entropy(input, target, weights=None):
@@ -177,13 +178,19 @@ def huber_loss(input, target, weight=None, size_average=True):
 def mae_loss(input, target, weight=None, size_average=True):
     if input.size() != target.size():
         input = input.permute(0, 2, 3, 1).squeeze()
-    return F.l1_loss(input, target)
+    loss = torch.abs(input - target)
+    if weight is not None:
+        loss = loss * weight.unsqueeze(1)
+    return torch.mean(loss)
 
 
 def mse_loss(input, target, weight=None, size_average=True):
     if input.size() != target.size():
         input = input.permute(0, 2, 3, 1).squeeze()
-    return F.mse_loss(input, target)
+    loss = (input - target)**2
+    if weight is not None:
+        loss = loss * weight.unsqueeze(1)
+    return torch.mean(loss)
 
 
 def get_mask_from_section(angles, section='horizontal'):
