@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torchvision
 
 from utils.im_utils import labels, prob_labels, trainId2label, id2label, \
-    decode_segmap, inst_labels, name2label, get_color_inst
+    decode_segmap, inst_labels, name2label, get_color_inst, instance_trainId
 from utils.constants import TASKS, MODEL, OUTPUTS, TYPE, SEMANTIC, INSTANCE, \
     DISPARITY, PANOPTIC, ACTIVE, OUTPUTS_TO_TASK, INSTANCE_REGRESSION, \
     INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS, \
@@ -71,12 +71,16 @@ class TargetGenerator():
             if n != 1:
                 self.bbox_offsets = np.zeros((n, 4, scaled_h, scaled_w),
                                              dtype=np.int16)
+                self.bbox_labels = np.zeros((n, scaled_h, scaled_w),
+                                            dtype=np.int16)
                 self.bboxes = {i: [] for i in range(n)}
                 self.bbox_loss_mask = np.ones((n, scaled_h, scaled_w),
                                               dtype=np.float32)
             else:
                 self.bbox_offsets = np.zeros((4, scaled_h, scaled_w),
                                              dtype=np.int16)
+                self.bbox_labels = np.zeros((scaled_h, scaled_w),
+                                            dtype=np.int16)
                 self.bboxes = []
                 self.bbox_loss_mask = np.ones((scaled_h, scaled_w),
                                               dtype=np.float32)
@@ -108,10 +112,14 @@ class TargetGenerator():
             self.labels.update(
                 {'bounding_box':
                  {'targets':
-                  torch.tensor(self.bbox_offsets).float().cuda(),
+                  {'class': torch.tensor(self.bbox_labels).float().cuda(),
+                   'offsets': torch.tensor(self.bbox_offsets).float().cuda()
+                   },
                   'loss_mask':
                   torch.tensor(self.bbox_loss_mask).float().cuda(),
-                  'bboxes': self.bboxes}})
+                  'bboxes': self.bboxes
+                  }
+                 })
 
         return self.labels
 
@@ -147,9 +155,10 @@ class TargetGenerator():
                 self.instance_cnt = get_contours(self.instance_cnt,
                                                  inst, segmentId) \
                     if self.instance_cnt is not None else None
-                self.bbox_offsets, self.loss_mask, self.bboxes =\
-                    get_bbox_offsets(self.bbox_offsets, self.bbox_loss_mask,
-                                     self.bboxes,
+                (self.bbox_offsets, self.bbox_labels,
+                 self.loss_mask, self.bboxes) =\
+                    get_bbox_offsets(self.bbox_offsets, self.bbox_labels,
+                                     self.bbox_loss_mask, self.bboxes,
                                      inst, segmentId, self.min_area,
                                      self.min_height, self.min_width) \
                     if self.bbox_offsets is not None else None
@@ -244,7 +253,7 @@ def get_centroids_img(centroids_t, vec_loss_mask, mask, min_area):
     mask = mask.astype(np.uint8)
     area = np.sum(mask)
     # print(area)
-    if area < min_area:
+    if area <= 0:
         return centroids_t
     xsys = np.nonzero(mask)
     xs, ys = xsys[0], xsys[1]
@@ -281,46 +290,45 @@ def get_contour_img(img, mask):
     return img
 
 
-def get_bbox_offsets(img, loss_mask, bboxes, inst, segmentId,
+def get_bbox_offsets(offsets, labels, loss_mask, bboxes, inst, segmentId,
                      min_area, min_h, min_w):
-    h, w = img.shape[-2], img.shape[-1]
+    h, w = offsets.shape[-2], offsets.shape[-1]
     if len(inst.shape) == 3:
         n = inst.shape[0]
         for i in range(n):
             resized_inst = cv2.resize(inst[i, ...], dsize=(w, h),
                                       interpolation=cv2.INTER_NEAREST)
             mask = (resized_inst == segmentId)
-            img[i, ...], loss_mask[i, ...], bboxes[i] = \
-                get_bbox_offset_img(img[i, ...], loss_mask[i, ...],
-                                    bboxes[i],
-                                    mask, min_area, min_h, min_w)
+            offsets[i, ...], labels[i, ...], loss_mask[i, ...], bboxes[i] = \
+                get_bbox_offset_img(offsets[i, ...], labels[i, ...],
+                                    loss_mask[i, ...], bboxes[i],
+                                    mask, segmentId, min_area, min_h, min_w)
 
-        return img, loss_mask, bboxes
+        return offsets, labels, loss_mask, bboxes
     else:
         resized_inst = cv2.resize(inst, dsize=(w, h),
                                   interpolation=cv2.INTER_NEAREST)
-        return get_bbox_offset_img(img, loss_mask, bboxes, mask, min_area,
-                                   min_h, min_w)
+        return get_bbox_offset_img(offsets, labels, loss_mask, bboxes, mask,
+                                   segmentId, min_area, min_h, min_w)
 
 
-def get_bbox_offset_img(img, loss_mask, bbox_img, mask,
+def get_bbox_offset_img(offsets, labels, loss_mask, bbox_img, mask, segmentId,
                         min_area, min_h, min_w):
     mask = mask.astype(np.uint8)
     area = np.sum(mask)
-    if area < min_area:
-        return img, loss_mask, bbox_img
+    if area == 0:
+        return offsets, labels, loss_mask, bbox_img
     bbox = get_bbox(mask)
-    if bbox[2] >= min_h and bbox[3] >= min_w:
-        pt1, pt2 = get_corners(bbox)
-        xmin, xmax, ymin, ymax = get_bbox_support_region(bbox)
-        offsets = get_offsets_in_support_region(xmin, xmax, ymin, ymax, bbox)
-        img[:, xmin:xmax, ymin:ymax] = offsets
-        loss_mask[xmin:xmax, ymin:ymax] = 1000 / area
-        bbox_img.append([pt1[0], pt1[1], pt2[0], pt2[1]])
+    # if bbox[2] >= min_h and bbox[3] >= min_w:
+    pt1, pt2 = get_corners(bbox)
+    xmin, xmax, ymin, ymax = get_bbox_support_region(bbox)
+    offsets[:, xmin:xmax, ymin:ymax] = \
+        get_offsets_in_support_region(xmin, xmax, ymin, ymax, bbox)
+    labels[xmin:xmax, ymin:ymax] = instance_trainId[segmentId//1000]
+    loss_mask[xmin:xmax, ymin:ymax] = 1000 / area
+    bbox_img.append([pt1[1], pt1[0], pt2[1], pt2[0]])
 
-    else:
-        return img, loss_mask, bbox_img
-    return img, loss_mask, bbox_img
+    return offsets, labels, loss_mask, bbox_img
 
 
 def get_corners(bbox):
@@ -544,10 +552,10 @@ def get_predictions(logits, cfg, targets):
             predictions[task] = torch.argmax(logits[task], dim=1)
         elif cfg[task][POSTPROC] == 'bbox':
             predictions[task] = \
-                get_bboxes_nms(logits[task], logits['semantic'],
-                               scale_factor=cfg[task]['scale_factor'],
-                               conf_thresh=cfg[task]['conf_thresh'],
-                               iou_thresh=cfg[task]['iou_thresh'])
+                get_bboxes_filtered(logits[task], targets[task],
+                                    scale_factor=cfg[task]['scale_factor'],
+                                    conf_thresh=cfg[task]['conf_thresh'],
+                                    iou_thresh=cfg[task]['iou_thresh'])
         else:
             predictions[task] = logits[task]
     return predictions
@@ -573,39 +581,83 @@ def post_process_predictions(predictions, post_proc_cfg):
     return outputs
 
 
-def get_bboxes_nms(offsets, confidence, scale_factor=0.25,
-                   conf_thresh=0.5, iou_thresh=0.5, labels=labels):
-    confidence = F.interpolate(confidence, scale_factor=scale_factor,
-                               mode='bilinear', align_corners=True)
-    confidence_masked = get_confidence_mask(confidence, conf_thresh, labels)
+def get_bboxes_filtered(logits, targets, scale_factor=0.25,
+                        conf_thresh=0.5, iou_thresh=0.5):
+    confidence, offsets = logits['class'], logits['offsets']
+    if isinstance(confidence, dict) and isinstance(offsets, dict):
+        if len(offsets[1].size()) == 4:
+            n, c, h, w = offsets[1].size()
+        else:
+            c, h, w = offsets[1].size()
+            n = 1
+        bboxes = {i: [] for i in range(n)}
+        scores = {i: [] for i in range(n)}
+        confidence_masked = {k: None for k in confidence.keys()}
+        for k, v in confidence.items():
+            confidence_masked[k] = get_confidence_mask(v, conf_thresh)
 
-    if len(offsets.size()) == 4:
-        n, c, h, w = offsets.size()
+        for i in range(n):
+            for k, v in confidence_masked.items():
+                box, score = get_bbox_filtered(offsets[k][i, ...],
+                                               v[i, ...], iou_thresh,
+                                               h, w, k)
+                bboxes[i].extend(box)
+                scores[i].extend(score)
+
     else:
-        c, h, w = offsets.size()
-        n = 1
-    bboxes = {i: [] for i in range(n)}
-    for i in range(n):
-        bboxes[i] = get_bbox_nms(offsets[i, ...],
-                                 confidence_masked[i, ...], iou_thresh)
-
+        confidence_masked = get_confidence_mask(confidence, conf_thresh)
+        if len(offsets.size()) == 4:
+            n, c, h, w = offsets.size()
+        else:
+            c, h, w = offsets.size()
+            n = 1
+        bboxes = {i: [] for i in range(n)}
+        scores = {i: [] for i in range(n)}
+        for i in range(n):
+            bboxes[i], scores[i] = get_bbox_filtered(offsets[i, ...],
+                                                     confidence_masked[i, ...], iou_thresh,
+                                                     h, w)
+    bboxes = get_nms_boxes(bboxes, scores, iou_thresh)
     return bboxes
 
 
-def get_bbox_nms(offset_img, confidence_img, iou_thresh=0.7):
-    positions = torch.nonzero(confidence_img)
+def get_bbox_filtered(offset_img, confidence_img, iou_thresh=0.7, h=64, w=128,
+                      stride=1):
+    positions = torch.nonzero(confidence_img)*stride
     if positions.size()[0] == 0:
         return []
-    scores = confidence_img[positions[:, 0], positions[:, 1]]
-    offsets = offset_img[:, positions[:, 0], positions[:, 1]]
-    bbox_cords = torch.mul(offsets.T, torch.tensor([-1, -1, 1, 1]).cuda())
-    bbox_cords += positions[:, [1, 0, 1, 0]]
-    bbox = torchvision.ops.nms(bbox_cords, scores, iou_thresh)
+    with torch.no_grad():
+        scores = confidence_img[positions[:, 0], positions[:, 1]]
+        offsets = offset_img[:, positions[:, 0], positions[:, 1]]
+        bbox_cords = torch.mul(offsets.T, torch.tensor([-1, -1, 1, 1]).cuda())
+        bbox_cords *= stride
+        bbox_cords += positions[:, [0, 1, 0, 1]]
+        bbox_area = (bbox_cords[:, 2]-bbox_cords[:, 0]) * \
+            (bbox_cords[:, 3]-bbox_cords[:, 1])
+        keep_inds = torch.nonzero((bbox_area >= 5).float())
+        filtered_boxes = bbox_cords[keep_inds].squeeze()
+        scores = scores[keep_inds].squeeze()
+        if filtered_boxes.size()[0] == 0:
+            return []
+        if len(filtered_boxes.size()) == 1:
+            return [filtered_boxes]
+        filtered_boxes[:, [0, 2]] = torch.clamp(
+            filtered_boxes[:, [0, 2]], min=0, max=h)
+        filtered_boxes[:, [1, 3]] = torch.clamp(
+            filtered_boxes[:, [1, 3]], min=0, max=w)
+        filtered_boxes = filtered_boxes.cpu()
 
-    return bbox_cords[bbox]
+    return filtered_boxes, scores
 
 
-def get_confidence_mask(confidence_img, conf_thresh=0.5, labels=labels):
+def get_nms_boxes(filtered_boxes, scores, iou_thresh):
+    bbox = torchvision.ops.nms(
+        filtered_boxes, scores.cpu(), iou_thresh)
+    keep_boxes = filtered_boxes[bbox, :]
+    return keep_boxes
+
+
+def get_confidence_mask(confidence_img, conf_thresh=0.5):
 
     if len(confidence_img.size()) == 4:
         n, c, h, w = confidence_img.size()
@@ -618,10 +670,7 @@ def get_confidence_mask(confidence_img, conf_thresh=0.5, labels=labels):
         confidence_img = torch.softmax(confidence_img, dim=0)
         max_conf, class_ = confidence_img.max(0)
 
-    for i in torch.unique(class_):
-        label = trainId2label[i.item()]
-        if label.hasInstances:
-            class_mask[class_ == i] = 1
+    class_mask[class_ != 0] = 1
     max_conf[class_mask == 0] = 0
     max_conf[max_conf < conf_thresh] = 0
     return max_conf

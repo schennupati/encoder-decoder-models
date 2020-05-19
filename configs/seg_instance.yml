@@ -9,7 +9,7 @@ model:
     semantic:
       active: &semantic_active True
       out_channels: 19
-      loss: cross_entropy2d
+      loss: focal_loss
       loss_weight: 1.0
       metric: classification_metrics
       postproc: argmax
@@ -30,20 +30,21 @@ model:
     instance_regression:
       active: &regression_active True
       out_channels: 2
-      loss: l1
+      loss: huber_loss
       loss_weight: 1.0
       metric: None
       postproc: None
     bounding_box:
       active: &bbox_active True
-      out_channels: 4
-      loss: l2
-      loss_weight: 1.0
-      metric: mAP
+      multi-scale: False
+      out_channels: 9
+      loss: bbox_loss
+      loss_weight: 0.5
+      metric: None
       postproc: bbox
       scale_factor: 0.25
-      conf_thresh: 0.5
-      iou_thresh: 0.5
+      conf_thresh: 0.7
+      iou_thresh: 0.3
     instance_heatmap:
       active: &heatmap_active False
       out_channels: 1
@@ -85,7 +86,7 @@ postprocs:
 
 data:
   dataset: Cityscapes
-  root_path: /home/sumche/datasets/Cityscapes
+  root_path: /home/sumche/datasets/cityscapes
   im_size: &im_size 256
   random_scaling: !!python/tuple &random_scaling [0.5, 1.0]
   val_im_size: &val_im_size 512
@@ -151,7 +152,7 @@ data:
 
 params:
   savelogs: True
-  batchsize: &batch_size 24
+  batchsize: &batch_size 4
   n_workers: &n_workers 8
   multigpu: True
   gpu_id: 1
@@ -171,6 +172,6 @@ params:
       amsgrad: True
       weight_decay: 1.0e-4
   val:
-    batch_size: 24
+    batch_size: 16
     shuffle: True
     n_workers: *n_workers

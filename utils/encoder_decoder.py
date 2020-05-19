@@ -10,9 +10,9 @@ from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Variable
 
-from models import FCN, FPN, EdgeDNN, DeepLabv3, encoder_fn
+from models import FCN, build_fpn, EdgeDNN, DeepLabv3, encoder_fn
 
-decoder_map = {'fcn': (FCN), 'fpn': (FPN), 'DeepLabv3': (DeepLabv3)}
+decoder_map = {'fcn': (FCN), 'fpn': (build_fpn), 'DeepLabv3': (DeepLabv3)}
 
 
 def get_encoder_decoder(cfg, pretrained_backbone=True):
@@ -21,11 +21,12 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     decoder_name = cfg['model']['decoder']
     tasks = cfg['tasks']
     if 'DeepLab' in decoder_name and 'resnet' in encoder_name:
-        encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
-                                           progress=True,
-                                           replace_stride_with_dilation=[True,
-                                                                         True,
-                                                                         True])
+        encoder = \
+            encoder_fn[encoder_name](pretrained=pretrained_backbone,
+                                     progress=True,
+                                     replace_stride_with_dilation=[True,
+                                                                   True,
+                                                                   True])
         in_planes = list(encoder.in_planes_map.values())[-1]
         out_planes = [in_planes//8]
 
@@ -37,7 +38,7 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
         if encoder_name in ['resnet18', ['resnet34']]:
             out_planes = in_planes[1:3]
         else:
-            out_planes = [planes//4 for planes in in_planes[:2]]
+            out_planes = [planes//8 for planes in in_planes[:2]]
 
     model = Encoder_Decoder(encoder, decoder_map[decoder_name], cfg,
                             in_planes=in_planes, out_planes=out_planes)
@@ -54,10 +55,10 @@ class Encoder_Decoder(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.heads = cfg['model']['outputs']
-        self.class_decoder = base_decoder_fn(in_planes, out_planes)
-
-        # self.reg_decoder = base_decoder_fn(in_planes, out_planes)
-        self.task_cls = {}
+        self.class_decoder = base_decoder_fn(
+            'symmetric', in_planes, out_planes)
+        self.reg_decoder = base_decoder_fn('top_down', in_planes, out_planes)
+        #self.bbox_decoder = base_decoder_fn(in_planes, out_planes)
         self.model = cfg['model']
         if self.heads['semantic']['active']:
             self.semantic = get_task_cls(out_planes[-1],
@@ -72,8 +73,10 @@ class Encoder_Decoder(nn.Module):
             self.instance_regression = get_task_cls(out_planes[-1],
                                                     self.heads['instance_regression']['out_channels'])
         if self.heads['bounding_box']['active']:
-            self.bounding_box = get_task_cls(out_planes[-1],
-                                             self.heads['bounding_box']['out_channels'])
+            self.bounding_box_class = get_task_cls(out_planes[-1],
+                                                   self.heads['bounding_box']['out_channels'])
+            self.bounding_box_offsets = get_task_cls(out_planes[-1], 4)
+
         if self.heads['instance_heatmap']['active']:
             self.instance_heatmap = get_task_cls(out_planes[-1],
                                                  self.heads['instance_heatmap']['out_channels'])
@@ -83,10 +86,11 @@ class Encoder_Decoder(nn.Module):
 
     def forward(self, input):
         outputs = {}
-        _, intermediate_result = self.encoder(input)
-        class_score, _ = self.class_decoder(intermediate_result)
         size = input.shape[-2:]
-        #reg_score, _ = self.reg_decoder(intermediate_result)
+        _, intermediate_result = self.encoder(input)
+        class_score, class_feats = self.class_decoder(intermediate_result)
+        reg_score, reg_feats = self.reg_decoder(intermediate_result)
+        #bbox_score, _ = self.bbox_decoder(intermediate_result)
         if self.heads['semantic']['active']:
             out = self.semantic(class_score)
             out = F.relu(out, inplace=True)
@@ -109,11 +113,38 @@ class Encoder_Decoder(nn.Module):
             outputs['instance_regression'] = out
         if self.heads['bounding_box']['active']:
             scale_factor = 4*self.heads['bounding_box']['scale_factor']
-            out = self.bounding_box(class_score)
-            out = F.relu(out, inplace=True)
-            out = F.interpolate(out, scale_factor=scale_factor,
-                                mode='bilinear', align_corners=True)
-            outputs['bounding_box'] = out
+            if self.heads['bounding_box']['multi-scale']:
+                offsets_out = {2 ** i: None for i in range(len(reg_feats))}
+                class_out = {2**i: None for i in range(len(reg_feats))}
+                for i in range(len(reg_feats)):
+                    offset_out = self.bounding_box_offsets(reg_feats[i])
+                    offset_out = F.relu(offset_out, inplace=True)
+                    offset_out = F.interpolate(offset_out,
+                                               scale_factor=scale_factor,
+                                               mode='bilinear', align_corners=True)
+
+                    out = self.bounding_box_class(reg_feats[i])
+                    out = F.relu(out, inplace=True)
+                    out = F.interpolate(out, scale_factor=scale_factor,
+                                        mode='bilinear', align_corners=True)
+                    offsets_out[2**i] = offset_out
+                    class_out[2**i] = out
+                outputs['bounding_box'] = {
+                    'class': class_out, 'offsets': offsets_out}
+            else:
+                offset_out = self.bounding_box_offsets(reg_score)
+                offset_out = F.relu(offset_out, inplace=True)
+                offset_out = F.interpolate(offset_out,
+                                           scale_factor=scale_factor,
+                                           mode='bilinear', align_corners=True)
+
+                out = self.bounding_box_class(class_score)
+                out = F.relu(out, inplace=True)
+                out = F.interpolate(out, scale_factor=scale_factor,
+                                    mode='bilinear', align_corners=True)
+                outputs['bounding_box'] = {
+                    'class': out, 'offsets': offsets_out}
+
         if self.heads['instance_heatmap']['active']:
             out = self.instance_heatmap(reg_score)
             out = F.interpolate(out, size=size,

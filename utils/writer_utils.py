@@ -195,8 +195,8 @@ def get_bbox(rgb, bboxes):
         rgb = cv2.rectangle(rgb, pt1, pt2, color, thickness)
     else:
         for bbox in bboxes:
-            pt1 = (int(bbox[0]), int(bbox[1]))
-            pt2 = (int(bbox[2]), int(bbox[3]))
+            pt1 = (int(bbox[1]), int(bbox[0]))
+            pt2 = (int(bbox[3]), int(bbox[2]))
 
             rgb = cv2.rectangle(rgb, pt1, pt2, color, thickness)
     return torch.tensor(rgb.get())
@@ -260,7 +260,7 @@ def add_images_to_writer(inputs, predictions, targets, writer,
 
 def normalize(rgb, scale_factor):
     rgb = F.interpolate(rgb.unsqueeze(1), scale_factor=scale_factor,
-                        mode='bilinear')
+                        mode='bilinear', align_corners=True)
     rgb = rgb.cpu().numpy() if torch.is_tensor(rgb) else to_rgb
     rgb = rgb.squeeze().transpose(1, 2, 0)
     rgb *= [0.229, 0.224, 0.225]

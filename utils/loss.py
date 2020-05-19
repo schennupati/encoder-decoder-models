@@ -89,7 +89,25 @@ def duality_focal_loss(input, target, weights=None, sample_weight=None,
     # logging.info(
     #     'focal_loss: {}, ce_loss: {}, l2_loss: {}'.format(focal_loss, ce_loss.mean(), l2_loss))
     # focal_loss.mean() + 10*l2_loss_seg_cnt + 1e3*l2_loss_inst_cnt
-    return focal_loss.mean() + 100*l2_loss_inst_cnt
+    return focal_loss.mean() + 100 * l2_loss_inst_cnt
+
+
+def focal_loss(input, target, weights=None, sample_weight=None,
+               gamma=1, size_average=True):
+    c = input.size()[1]
+    softmax_preds = F.softmax(input, dim=1).permute(
+        0, 2, 3, 1).contiguous().view(-1, c)
+    input, target = flatten_data(input, target)
+    target = target.long()
+    ce_loss = F.cross_entropy(input, target, weight=None,
+                              ignore_index=255, reduction='none')
+    target = target * (target != 255).long()
+    softmax_preds = torch.gather(softmax_preds, 1, target.unsqueeze(1))
+    focal_loss = ((1 - softmax_preds) ** gamma).squeeze() * ce_loss
+    if size_average:
+        return focal_loss.mean()
+    else:
+        return focal_loss
 
 
 def weighted_binary_cross_entropy(input, target, weights=None):
@@ -169,10 +187,41 @@ def dice_loss(input_soft, target, eps=1e-8):
     return torch.mean(-dice_score + 1.)
 
 
-def huber_loss(input, target, weight=None, size_average=True):
+def huber_loss(input, target, weight=None, delta=0.5, size_average=True):
     if input.size() != target.size():
         input = input.permute(0, 2, 3, 1).squeeze()
-    return F.smooth_l1_loss(input, target)
+    abs_diff = torch.abs(input - target)
+    cond = abs_diff < delta
+    loss = torch.where(cond, delta * abs_diff ** 2, abs_diff - delta)
+    if weight is not None:
+        loss = loss * weight.unsqueeze(1)
+    return loss.mean()
+
+
+def bbox_loss(input, target, weight=None, size_average=True):
+    loss = 0.0
+    if isinstance(input['class'], dict):
+        for k, v in input['class'].items():
+            logits = {'class': v, 'offsets': input['offsets'][k]}
+            loss += k*bbox_loss_level(logits, target, weight, k)
+    else:
+        loss = bbox_loss_level(input, target, weight)
+
+    return loss
+
+
+def bbox_loss_level(input, target, weight, stride=1):
+    class_target = F.interpolate(target['class'], scale_factor=1/stride,
+                                 mode='nearest')
+    offset_target = F.interpolate(target['offsets'], scale_factor=1/stride,
+                                  mode='bilinear', align_corners=True)
+    weight = F.interpolate(weight, scale_factor=1/stride,
+                           mode='nearest')
+    class_loss = focal_loss(input['class'], class_target, size_average=False)
+    class_loss = (class_loss*weight.view(-1)).mean()
+    bbox_loss = huber_loss(
+        input['offsets'], offset_target, weight=weight)
+    return class_loss + bbox_loss
 
 
 def mae_loss(input, target, weight=None, size_average=True):
@@ -181,7 +230,7 @@ def mae_loss(input, target, weight=None, size_average=True):
     loss = torch.abs(input - target)
     if weight is not None:
         loss = loss * weight.unsqueeze(1)
-    return torch.mean(loss)
+    return loss.mean()
 
 
 def mse_loss(input, target, weight=None, size_average=True):
@@ -190,7 +239,7 @@ def mse_loss(input, target, weight=None, size_average=True):
     loss = (input - target)**2
     if weight is not None:
         loss = loss * weight.unsqueeze(1)
-    return torch.mean(loss)
+    return loss.mean()
 
 
 def get_mask_from_section(angles, section='horizontal'):

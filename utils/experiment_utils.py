@@ -226,8 +226,6 @@ class ExperimentLoop():
         start = time()
         self.model = self.model.cuda()
         logits = self.model(inputs)
-        predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
-                                      labels)
         forward_s = time() - start
 
         start = time()
@@ -253,6 +251,8 @@ class ExperimentLoop():
                                    task_loss.mean().data,
                                    epoch*self.n_batches + batch)
         if batch == 0:
+            predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                          labels)
             self.send_predictions_to_writer(inputs, predictions, labels,
                                             self.train_loss_meters, epoch,
                                             TRAIN,
@@ -293,8 +293,6 @@ class ExperimentLoop():
 
                 start = time()
                 logits = self.model(inputs)
-                predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
-                                              labels)
                 forward_s = time() - start
                 backward_s = 0.0
                 postproc_s = 0.0
@@ -309,6 +307,8 @@ class ExperimentLoop():
                 loss_s = time() - start
 
                 start = time()
+                predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
+                                              labels)
                 self.val_metrics.update(labels, predictions)
                 metric_s = time() - start
 
