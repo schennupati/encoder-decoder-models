@@ -1,44 +1,56 @@
 """Helper functions for train/validation loop."""
-import logging
-import io
-import torch
-import tensorflow as tf
-import matplotlib
-import os
-import glob
 import datetime
-import numpy as np
-import matplotlib.pyplot as plt
-import cv2
-import scipy.misc
+import glob
+import io
+import logging
+import os
+from copy import deepcopy
 from time import time
+import random
 
-from tqdm import tqdm
-from torch import nn
-from torch.utils.tensorboard import SummaryWriter
+import cv2
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.misc
+import tensorflow as tf
+import torch
 from prettytable import PrettyTable
 from texttable import Texttable
-from copy import deepcopy
+from torch import nn
+from torch.utils.tensorboard import SummaryWriter
+import torch.nn.functional as F
+import torchvision.transforms.functional as TF
+from tqdm import tqdm
 
-
-from utils.encoder_decoder import get_encoder_decoder
-from utils.optimizers import get_optimizer
-from utils.metrics import metrics
+from utils.constants import (BATCH_LOG, BEST_LOSS, CPU, CRITERION_STATE, DATA,
+                             DECODER, EARLY_STOP, EARLY_STOP_STR, ENCODER,
+                             EPOCH, EPOCH_STR, EPOCHS, EXPERIMENT_NAME, GPU_ID,
+                             GPU_STR, IM_SIZE, INSTANCE_CONTOUR,
+                             INSTANCE_PROBS, LENGTH, LOGS, LOSS_FN, LOSS_STR,
+                             METRICS_STR, MILLION, MODEL, MODEL_NAME,
+                             MODEL_STATE, MULTIGPU, OPTIMIZER, OPTIMIZER_STATE,
+                             OUTPUTS, PANOPTIC, PARAMS, PATIENCE, PATIENCE_STR,
+                             PKL, PLATEAU_COUNT, POSTPROC, POSTPROCS,
+                             PRETRAINED_PATH, PRINT_INTERVAL, RESULTS_DIR,
+                             RESUME, ROOT_PATH, SAVE_LOGS, SEMANTIC,
+                             START_ITER, STATE, TASK_LOSS, TASK_STR, TASKS,
+                             TRAIN, TRAIN_STR, VAL, VAL_LOSS_STR, VAL_STR)
+from utils.data_utils import (TargetGenerator, get_class_weights_from_data,
+                              get_predictions, get_weights,
+                              post_process_predictions)
 from utils.dataloader import get_dataloaders
-from utils.loss_utils import loss_meters, MultiTaskLoss, averageMeter
-from utils.im_utils import cat_labels, prob_labels, inst_labels, labels
+from utils.encoder_decoder import get_encoder_decoder
+from utils.im_utils import cat_labels, inst_labels, labels, prob_labels
+from utils.loss_utils import MultiTaskLoss, averageMeter, loss_meters
+from utils.metrics import metrics
+from utils.optimizers import get_optimizer, get_scheduler
 from utils.writer_utils import add_images_to_writer
-from utils.data_utils import get_weights, get_class_weights_from_data, \
-    TargetGenerator, get_predictions
-from utils.constants import TRAIN, VAL, EXPERIMENT_NAME, BEST_LOSS, MILLION, \
-    START_ITER, PLATEAU_COUNT, STATE, GPU_STR, GPU_ID, CPU, PARAMS, MODEL, \
-    ENCODER, DECODER, DATA, IM_SIZE, PRETRAINED_PATH, ROOT_PATH, RESULTS_DIR, \
-    MULTIGPU, TASKS, MODEL_NAME, LOGS, SAVE_LOGS, PKL, EPOCHS, EARLY_STOP, \
-    PATIENCE, PRINT_INTERVAL, RESUME, MODEL_STATE, OPTIMIZER_STATE, LOSS_FN, \
-    CRITERION_STATE, EPOCH, EPOCH_STR, OUTPUTS, OPTIMIZER, LOSS_STR, \
-    TASK_LOSS, TRAIN_STR, VAL_STR, VAL_LOSS_STR, METRICS_STR, PATIENCE_STR, \
-    EARLY_STOP_STR, TASK_STR, SEMANTIC, INSTANCE_PROBS, INSTANCE_CONTOUR, \
-    POSTPROC, POSTPROCS, PANOPTIC, BATCH_LOG, LENGTH
+
+np.random.seed(1)
+torch.manual_seed(1)
+torch.cuda.manual_seed(1)
+torch.backends.cudnn.benchmark = True
 
 
 class ExperimentLoop():
@@ -68,15 +80,22 @@ class ExperimentLoop():
 
         # Get dataloaders, model, weights, optimizers and metrics
         self.dataloaders = get_dataloaders(self.cfg)
-        self.model = get_model(self.cfg)  # TODO:
+        self.model = get_model(self.cfg)
         self.weights = get_weights(self.cfg)
         self.criterion = self.get_criterion()
         self.optimizer = self.init_optimizer()
+        self.scheduler = self.init_scheduler()
         self.get_losses_and_metrics()
+        postprocs = False if self.mode == TRAIN else True
+        self.val_dataloader = get_dataloaders(self.cfg, ['val'], 1)[VAL]
+        self.train_generator = TargetGenerator(self.cfg)
+        self.val_generator = TargetGenerator(self.cfg, postprocs=postprocs)
 
         # Load Checkpoint
         self.model = place_on_multi_gpu(self.cfg, self.model)
         self.load_checkpoint()
+        self.loss_weights = self.criterion.module.sigma \
+            if self.cfg[PARAMS][MULTIGPU] else self.criterion.sigma
 
     def get_config_params(self):
         """Get configuration parameters for the experiment."""
@@ -89,12 +108,20 @@ class ExperimentLoop():
         self.save_criteria = params['save_criteria']
         self.print_interval = params[PRINT_INTERVAL]
         self.resume_training = params[RESUME]
+        self.update_interval = params['update_interval']
         self.exp_dir, _, _ = get_exp_dir(cfg)
         self.plateau_count = 0
         self.start_iter = 0
         self.best_loss = MILLION
         self.best_metric = 0
-        self.scale_factor = cfg[MODEL][OUTPUTS]['bounding_box']['scale_factor']
+        if cfg[MODEL][OUTPUTS].get('bounding_box', None):
+            self.scale_factor = cfg[MODEL][OUTPUTS]['bounding_box']['scale_factor']
+        else:
+            self.scale_factor = 1
+        if params.get('RandomChoiceResize', False):
+            self.resize_choices = params['RandomChoiceResize']['choices']
+        else:
+            self.resize_choices = None
 
     def get_criterion(self):
         """Get criterion for the current experiment."""
@@ -103,6 +130,7 @@ class ExperimentLoop():
         criterion = MultiTaskLoss(cfg[MODEL][OUTPUTS],
                                   self.weights, loss_fn)
         criterion = place_on_multi_gpu(self.cfg, criterion)
+
         return criterion
 
     def init_optimizer(self):
@@ -119,6 +147,16 @@ class ExperimentLoop():
         optimizer = optimizer_cls(model_params, **optimizer_params)
 
         return optimizer
+
+    def init_scheduler(self):
+        """Initialize the scheduler."""
+        scheduler_cls = get_scheduler(self.params[TRAIN])
+        scheduler_params = {k: v for k, v in
+                            self.params[TRAIN]['scheduler'].items()
+                            if k != "name"}
+        scheduler = scheduler_cls(self.optimizer, **scheduler_params)
+
+        return scheduler
 
     def get_losses_and_metrics(self):
         """Get loss and metric meters to log them during experiments."""
@@ -159,21 +197,20 @@ class ExperimentLoop():
         for epoch in range(self.epochs):
             logging.info(EPOCH_STR.format(epoch=epoch+1).center(LENGTH, '='))
             logging.info(TRAIN_STR.center(LENGTH, '='))
-            self.loss_weights = self.criterion.module.sigma \
-                if self.cfg[PARAMS][MULTIGPU] else self.criterion.sigma
+
             # self.loss_weights =  self.criterion.sigma
             logging.info('MTL Loss type: {}, Loss weights: {}'.
-                         format(self.cfg[MODEL][LOSS_FN], self.loss_weights)
-                         .center(LENGTH, '='))
+                         format(self.cfg[MODEL][LOSS_FN],
+                                self.loss_weights).center(LENGTH, '='))
             self.n_batches = len(self.dataloaders[TRAIN])
             # _ = get_class_weights_from_data(
             #    self.dataloaders[TRAIN], 9, self.cfg, task=INSTANCE_CONTOUR)
             self.train_running_loss = averageMeter()
-            self.train_generator = TargetGenerator(self.cfg)
-            self.val_generator = TargetGenerator(self.cfg)
             start = time()
+            self.total_loss = 0.0
             for batch_id, data in enumerate(self.dataloaders[TRAIN]):
-                self.train_step(data, epoch, batch_id)
+                inputs, targets = data
+                self.train_step(inputs, targets, epoch, batch_id)
                 # break
             train_s = time() - start
             loss_str = LOSS_STR.format(epoch=epoch+1,
@@ -182,18 +219,19 @@ class ExperimentLoop():
                 loss_str += TASK_LOSS.format(task, task_loss.avg)
             logging.info(loss_str + 'Time: {:05.3f}'.format(train_s))
 
-            self.validation_step(epoch)
-
-            # if epoch % self.print_interval == 0 and epoch > 0:
-            #    self.val_generator = TargetGenerator(self.cfg)
-            #    self.mode == VAL
-            #    self.validation_step(epoch)
-            #    self.mode == TRAIN
+            if (epoch + 1) % self.print_interval == 0 and epoch > 0:
+                self.mode = VAL
+                self.val_generator = TargetGenerator(self.cfg, postprocs=True)
+                self.validation_step(epoch)
+                self.mode = TRAIN
+            else:
+                self.validation_step(epoch)
 
             self.train_running_loss.reset()
             self.train_loss_meters.reset()
 
             self.save_model(epoch)
+            self.scheduler.step()
             if self.stop_training(epoch):
                 self.writer.close()
 
@@ -203,9 +241,10 @@ class ExperimentLoop():
 
     def validation(self):
         """Validate a model on a entire validation data."""
-        self.validation_step(epoch=1)
+        self.model = self.model.cuda()
+        self.validation_step(epoch=0)
 
-    def train_step(self, data, epoch, batch):
+    def train_step(self, inputs, targets, epoch, batch):
         """Train a model on a batch of data.
 
         Arguments:
@@ -217,7 +256,23 @@ class ExperimentLoop():
 
         self.optimizer.zero_grad()
         start = time()
-        inputs, targets = data
+        if self.resize_choices is not None:
+            choice = random.choice(self.resize_choices)
+            h, w = choice, int(2.0*choice)
+            inputs = F.interpolate(inputs, size=(h, w), mode='bilinear',
+                                   align_corners=True)
+            for i in range(len(targets)):
+                if targets[i].dtype == torch.float32:
+                    # print(torch.unique(targets[i]*255.0))
+                    targets[i] = F.interpolate(
+                        targets[i], size=(h, w), mode='nearest')
+                    # print(torch.unique(targets[i]*255.0))
+                elif targets[i].dtype == torch.int32:
+                    # print(torch.unique(targets[i]))
+                    targets[i] = F.interpolate(
+                        targets[i].float(), size=(h, w), mode='nearest').int()
+                    # print(torch.unique(targets[i]))
+
         inputs = inputs.cuda()
         # labels = get_labels(targets, self.cfg)
         labels = self.train_generator.generate_targets(targets[0], targets[1])
@@ -235,21 +290,28 @@ class ExperimentLoop():
         loss_s = time() - start
 
         start = time()
+        self.batch_size = inputs.shape[0]
         loss = loss.mean()
         loss.backward()
-        self.optimizer.step()
-        # torch.cuda.empty_cache()
+        self.total_loss += loss.item() / self.batch_size
+        if (batch+1) % self.update_interval == 0:
+            # here we perform out optimization step using a virtual batch size
+            # logging.info('Optimizer Step')
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.total_loss = 0.0
         backward_s = time() - start
 
         start = time()
-        self.batch_size = inputs.shape[0]
+
         self.sample_idx = np.random.randint(0, self.batch_size, size=1)
-        self.writer.add_scalar('Loss/train', loss.mean().data,
-                               epoch*self.n_batches + batch)
+        self.writer.add_scalar('Loss/train', loss.mean().item(),
+                               epoch*self.n_batches + batch + 1)
         for task, task_loss in losses.items():
+            logits[task] = logits[task].detach()
             self.writer.add_scalar('Loss/train_{}'.format(task),
-                                   task_loss.mean().data,
-                                   epoch*self.n_batches + batch)
+                                   task_loss.mean().item(),
+                                   epoch*self.n_batches + batch + 1)
         if batch == 0:
             predictions = get_predictions(logits, self.cfg[MODEL][OUTPUTS],
                                           labels)
@@ -257,13 +319,13 @@ class ExperimentLoop():
                                             self.train_loss_meters, epoch,
                                             TRAIN,
                                             scale_factor=self.scale_factor)
-        if batch % self.print_interval == 0 or batch == self.n_batches:
+        if batch % self.print_interval == 0 or batch == self.n_batches-1:
             writer_s = time() - start
             postproc_s = 0.0
             metric_s = 0.0
             train_s = loader_s + forward_s + backward_s + \
                 loss_s + postproc_s + writer_s + metric_s
-            logging.info(BATCH_LOG.format(epoch+1, batch, self.n_batches,
+            logging.info(BATCH_LOG.format(epoch + 1, batch + 1, self.n_batches,
                                           train_s, loader_s, forward_s,
                                           backward_s, loss_s,
                                           postproc_s, metric_s, writer_s))
@@ -278,9 +340,10 @@ class ExperimentLoop():
 
         logging.info(VAL_STR.center(LENGTH, '='))
         running_val_loss = averageMeter()
+        val_dataloader = self.dataloaders[VAL] \
+            if self.mode == TRAIN else self.val_dataloader
         with torch.no_grad():
-            for i, data in enumerate(self.dataloaders[VAL]):
-                get_postprocs = True if self.mode == VAL else False
+            for i, data in enumerate(val_dataloader):
                 start = time()
                 inputs, targets = data
                 inputs = inputs.cuda()
@@ -323,21 +386,21 @@ class ExperimentLoop():
                     metric_s += time() - start
 
                     start = time()
-                    self.send_predictions_to_writer(inputs, predictions,
-                                                    labels,
-                                                    self.val_loss_meters, i,
+                    if i == 0:
+                        self.send_predictions_to_writer(inputs, predictions,
+                                                        labels, self.val_loss_meters,
+                                                        epoch + 1, VAL, save_to_disk=True,
+                                                        scale_factor=self.scale_factor)
+                        self.send_outputs_to_writer(inputs, outputs, labels,
+                                                    self.post_proc_metrics, epoch + 1,
                                                     VAL, save_to_disk=True,
                                                     scale_factor=self.scale_factor)
-                    self.send_outputs_to_writer(outputs, labels,
-                                                self.post_proc_metrics, i, VAL,
-                                                save_to_disk=True,
-                                                scale_factor=self.scale_factor)
                     writer_s = time() - start
-                # break
+                # if i == 5:
+                    # break
                 val_s = loader_s + forward_s + backward_s + \
                     loss_s + postproc_s + writer_s + metric_s
-                logging.info(BATCH_LOG.format(0, i,
-                                              len(self.dataloaders[VAL]),
+                logging.info(BATCH_LOG.format(epoch+1, i, len(val_dataloader),
                                               val_s, loader_s, forward_s,
                                               backward_s, loss_s,
                                               postproc_s, metric_s, writer_s))
@@ -345,25 +408,27 @@ class ExperimentLoop():
             start = time()
             loss_str = VAL_LOSS_STR.format(epoch=epoch + 1,
                                            loss=running_val_loss.avg)
-            self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch)
+            self.writer.add_scalar('Loss/Val', running_val_loss.avg, epoch + 1)
             for task, loss in self.val_loss_meters.meters.items():
                 loss_str += TASK_LOSS.format(task, loss.avg.mean())
                 self.writer.add_scalar('Loss/Validation_{}'.format(task),
-                                       loss.avg.mean(), epoch)
+                                       loss.avg.mean(), epoch + 1)
                 self.send_predictions_to_writer(inputs, predictions,
                                                 labels, self.val_loss_meters,
-                                                epoch, VAL,
+                                                epoch + 1, VAL,
                                                 scale_factor=self.scale_factor)
             writer_s = time() - start
-            logging.info(loss_str + 'Time: {:05.3f}'.format(time()-val_start))
+            logging.info(loss_str)
+        logging.info('Time: {:05.3f}'.format(time()-val_start))
 
         print_metrics(self.val_metrics)
         if self.mode == VAL:
             print_metrics(self.post_proc_metrics)
         self.val_loss = running_val_loss.avg
         val_metric = self.val_metrics.metrics
-        tasks = list(self.val_loss_meters.meters.keys())
-        self.val_metric = val_metric[tasks[0]].get_scores()[0]['Mean IoU']*100
+        tasks = list(val_metric.keys())
+        self.val_metric = val_metric['semantic'].get_scores()[
+            0]['Mean IoU']*100
         self.val_loss_meters.reset()
         self.val_metrics.reset()
         self.post_proc_metrics.reset()
@@ -373,17 +438,26 @@ class ExperimentLoop():
                                    epoch=1, state=VAL, save_to_disk=False,
                                    scale_factor=0.25):
         for task in meters.meters.keys():
-            add_images_to_writer(inputs, predictions[task], labels[task],
-                                 self.writer, epoch, task, state=state,
-                                 sample_idx=self.sample_idx,
-                                 save_to_disk=save_to_disk,
-                                 scale_factor=scale_factor)
+            if task == 'semantic_with_instance':
+                for task in [SEMANTIC, INSTANCE_CONTOUR]:
+                    add_images_to_writer(inputs, predictions[task],
+                                         labels[task], self.writer, epoch,
+                                         task, state=state,
+                                         sample_idx=self.sample_idx,
+                                         save_to_disk=save_to_disk,
+                                         scale_factor=scale_factor)
+            else:
+                add_images_to_writer(inputs, predictions[task], labels[task],
+                                     self.writer, epoch, task, state=state,
+                                     sample_idx=self.sample_idx,
+                                     save_to_disk=save_to_disk,
+                                     scale_factor=scale_factor)
 
-    def send_outputs_to_writer(self, outputs, labels, metrics, epoch=1,
+    def send_outputs_to_writer(self, inputs, outputs, labels, metrics, epoch=1,
                                state=VAL, save_to_disk=False,
                                scale_factor=0.25):
         for task in metrics.metrics.keys():
-            add_images_to_writer(None, outputs[task], labels[task],
+            add_images_to_writer(inputs, outputs[task], labels[task],
                                  self.writer, epoch, task, state=state,
                                  sample_idx=self.sample_idx,
                                  save_to_disk=save_to_disk,
@@ -673,11 +747,11 @@ def print_metrics(metrics):
                     print_table(class_iou, inst_labels)
                 elif task == PANOPTIC:
                     t = PrettyTable(['Category']+list(class_iou.keys()))
-                    for label in labels:
+                    for label in labels[:-1]:
                         if label.ignoreInEval:
                             continue
                         row = ([label.name] + ['{:05.3f}'.format(
-                            class_iou[metric][label.id]*100)
+                            class_iou[metric][label.trainId]*100)
                             for metric in class_iou.keys()])
                         t.add_row(row)
                     print(t)

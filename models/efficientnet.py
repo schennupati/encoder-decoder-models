@@ -251,18 +251,17 @@ class EfficientNet(nn.Module):
         down_sampled_8 = self.layer3(down_sampled_4)
         down_sampled_16 = self.layer4(down_sampled_8)
         down_sampled_32 = self.layer5(down_sampled_16)
-        out = self.last_layer(down_sampled_32)
-        out = out.mean([2, 3])
-        out = self.classifier(out)
-        intermed = [down_sampled_2,
-                    down_sampled_4,
+        # out = self.last_layer(down_sampled_32)
+        # out = out.mean([2, 3])
+        # out = self.classifier(out)
+        intermed = [down_sampled_4,
                     down_sampled_8,
                     down_sampled_16,
                     down_sampled_32]
         if self.multiscale:
-            return out, intermed
+            return down_sampled_32, intermed
         else:
-            return out
+            return down_sampled_32
 
 
 def _efficientnet(arch, pretrained, progress, multiscale=False, **kwargs):
@@ -278,6 +277,11 @@ def _efficientnet(arch, pretrained, progress, multiscale=False, **kwargs):
             del state_dict['classifier.1.bias']
 
         model.load_state_dict(state_dict, strict=False)
+        freeze_layers = ['layer1', 'layer2']
+        for name, module in model.named_children():
+            if name in freeze_layers:
+                for param in module.parameters():
+                    param.requires_grad = False
     return model
 
 

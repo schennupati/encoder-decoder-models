@@ -71,6 +71,7 @@ def get_transform_from_name(transform_name, params):
             return transforms.RandomCrop(size=params['size'])
         else:
             return transforms.RandomCrop(size=(params['size'], 2*params['size']))
+
     elif transform_name == 'RandomHorizontalFlip':
         return transforms.RandomHorizontalFlip(p=0.5)
 

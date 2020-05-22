@@ -5,12 +5,13 @@ import numpy as np
 import torch
 import copy
 
-from utils.im_utils import labels, id2label
+from utils.im_utils import labels, id2label, to_rgb
 from utils.constants import SEGMENT_INFO, PANOPTIC_IMAGE, VOID
+import matplotlib.pyplot as plt
 
 
 class semanticMetrics(object):
-    def __init__(self, n_classes):
+    def __init__(self, n_classes=2):
 
         self.n_classes = n_classes
         self.reset()
@@ -93,10 +94,13 @@ class panopticMetrics(object):
         self.reset()
 
     def reset(self):
-        self.metrics = {'iou': {label.id: 0 for label in labels},
-                        'tp': {label.id: 0 for label in labels},
-                        'fp': {label.id: 0 for label in labels},
-                        'fn': {label.id: 0 for label in labels}}
+        metric_items = ['iou', 'tp', 'fp', 'fn', 'cov', 'ap']
+        self.metrics = {metric: {} for metric in metric_items}
+        for label in labels:
+            if label.ignoreInEval:
+                continue
+            for metric in metric_items:
+                self.metrics[metric].update({label.trainId: 0})
 
     def rgb2id(self, color):
         if isinstance(color, np.ndarray) and len(color.shape) >= 3:
@@ -138,21 +142,31 @@ class panopticMetrics(object):
 
         sq = iou / tp
         rq = tp / (tp + 0.5 * fp + 0.5 * fn)
-        pq = sq * rq
+        pq = iou / (tp + 0.5 * fp + 0.5 * fn)
+        precision = tp / (np.max((tp + fp, 1)))
+        recall = tp / (np.max((tp + fn, 1)))
 
         mean_metrics = {"Mean PQ": self.get_mean_metric(pq),
                         "Mean RQ": self.get_mean_metric(sq),
-                        "Mean SQ": self.get_mean_metric(rq)}
+                        "Mean SQ": self.get_mean_metric(rq),
+                        "Mean AP": self.get_mean_metric(ap[11:]),
+                        "Mean PQSt": self.get_mean_metric(pq[:11]),
+                        "Mean RQSt": self.get_mean_metric(sq[:11]),
+                        "Mean SQSt": self.get_mean_metric(rq[:11]),
+                        "Mean PQTh": self.get_mean_metric(pq[11:]),
+                        "Mean RQTh": self.get_mean_metric(sq[11:]),
+                        "Mean SQTh": self.get_mean_metric(rq[11:])}
         class_metrics = {'pq': pq,
                          'rq': rq,
-                         'sq': sq}
+                         'sq': sq,
+                         'ap': ap}
 
         return mean_metrics, class_metrics
 
     def get_pan_labels_preds(self, label_true, label_preds):
-        pan_label_true = label_true[PANOPTIC_IMAGE]
+        pan_label_true = label_true[PANOPTIC_IMAGE].squeeze()
         segment_label_true = label_true[SEGMENT_INFO]
-        pan_label_pred = label_preds[PANOPTIC_IMAGE]
+        pan_label_pred = label_preds[PANOPTIC_IMAGE].squeeze()
         segment_label_pred = label_preds[SEGMENT_INFO]
 
         self.true_segms = {el['id']: el for el in segment_label_true}
@@ -161,6 +175,10 @@ class panopticMetrics(object):
 
         pan_label_true = self.rgb2id(pan_label_true)
         pan_label_pred = self.rgb2id(pan_label_pred)
+        # axis = plt.subplots(2)[-1]
+        # axis[0].imshow(to_rgb(pan_label_true))
+        # axis[1].imshow(to_rgb(pan_label_pred))
+        # plt.show()
 
         pan_true_pred = pan_label_true.astype(np.uint64)*self.OFFSET + \
             pan_label_pred.astype(np.uint64)
@@ -243,28 +261,50 @@ class metrics:
             if self.cfg[task]['metric'] == 'classification_metrics' and \
                     self.cfg[task]['active']:
                 metrics[task] = semanticMetrics(self.cfg[task]['out_channels'])
+            elif self.cfg[task]['metric'] == 'binary_metrics' and \
+                    self.cfg[task]['active']:
+                metrics[task] = semanticMetrics(2)
+            elif self.cfg[task]['metric'] == 'dual_classification_metrics' and \
+                    self.cfg[task]['active']:
+                metrics['semantic'] = semanticMetrics(
+                    self.cfg[task]['out_channels'])
+                metrics['instance_contour'] = semanticMetrics(2)
             elif self.cfg[task]['metric'] == 'regression_metrics' and \
                     self.cfg[task]['active']:
                 metrics[task] = regressionAccruacy()
             elif self.cfg[task]['metric'] == 'panoptic_metrics' and \
                     self.cfg[task]['active']:
-                metrics[task] = panopticMetrics(labels)
+                metrics[task] = panopticMetrics(labels[:-1])
             else:
                 metrics[task] = None
         return metrics
 
     def update(self, label_trues, label_preds):
         for task in self.cfg.keys():
-            if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
-                gt = label_trues[task]
-                pred = label_preds[task]
-                if torch.is_tensor(gt):
-                    gt = gt.data.cpu().numpy()
-                if torch.is_tensor(pred):
-                    pred = pred.data.cpu().numpy()
-                self.metrics[task].update(gt, pred)
+            if task != 'semantic_with_instance':
+                if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
+                    gt = label_trues[task]
+                    pred = label_preds[task]
+                    if torch.is_tensor(gt):
+                        gt = gt.data.cpu().numpy()
+                    if torch.is_tensor(pred):
+                        pred = pred.data.cpu().numpy()
+                    self.metrics[task].update(gt, pred)
+            else:
+                for task in ['semantic', 'instance_contour']:
+                    gt = label_trues[task]
+                    pred = label_preds[task]
+                    if torch.is_tensor(gt):
+                        gt = gt.data.cpu().numpy()
+                    if torch.is_tensor(pred):
+                        pred = pred.data.cpu().numpy()
+                    self.metrics[task].update(gt, pred)
 
     def reset(self):
         for task in self.cfg.keys():
-            if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
-                self.metrics[task].reset()
+            if task != 'semantic_with_instance':
+                if self.cfg[task]['metric'] != 'None' and self.cfg[task]['active']:
+                    self.metrics[task].reset()
+            else:
+                for task in ['semantic', 'instance_contour']:
+                    self.metrics[task].reset()

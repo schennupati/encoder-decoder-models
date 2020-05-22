@@ -223,16 +223,15 @@ class ResNet(nn.Module):
             down_sampled_16 = self.layer3(down_sampled_8)
             down_sampled_32 = self.layer4(down_sampled_16)
 
-            out = self.avgpool(down_sampled_32)
-            out = torch.flatten(out, 1)
-            out = self.fc(out)
+            #out = self.avgpool(down_sampled_32)
+            #out = torch.flatten(out, 1)
+            #out = self.fc(out)
 
-            intermed = [down_sampled_2,
-                        down_sampled_4,
+            intermed = [down_sampled_4,
                         down_sampled_8,
                         down_sampled_16,
                         down_sampled_32]
-            return out, intermed
+            return down_sampled_32, intermed
         else:
             x = self.relu(x)
             x = self.maxpool(x)
@@ -242,11 +241,11 @@ class ResNet(nn.Module):
             x = self.layer3(x)
             x = self.layer4(x)
 
-            out = self.avgpool(x)
-            out = torch.flatten(out, 1)
-            out = self.fc(out)
+            #out = self.avgpool(x)
+            #out = torch.flatten(out, 1)
+            #out = self.fc(out)
 
-            return out, x
+            return x
 
 
 def _resnet(arch, multiscale, block, layers, pretrained, progress, **kwargs):
@@ -254,7 +253,13 @@ def _resnet(arch, multiscale, block, layers, pretrained, progress, **kwargs):
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
+        freeze_layers = ['conv1', 'bn1', 'relu', 'maxpool', 'layer1',
+                         'avgpool', 'fc']
+        for name, module in model.named_children():
+            if name in freeze_layers:
+                for param in module.parameters():
+                    param.requires_grad = False
     return model
 
 

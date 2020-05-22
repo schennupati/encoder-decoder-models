@@ -33,12 +33,15 @@ def get_encoder_decoder(cfg, pretrained_backbone=True):
     else:
         encoder = encoder_fn[encoder_name](pretrained=pretrained_backbone,
                                            progress=True, multiscale=True)
-        in_planes = list(encoder.in_planes_map.values())
+        in_planes = list(encoder.in_planes_map.values())[1:]
         in_planes.reverse()
-        if encoder_name in ['resnet18', ['resnet34']]:
-            out_planes = in_planes[1:3]
+        if 'resnet' in encoder_name:
+            if encoder_name in ['resnet18', ['resnet34']]:
+                out_planes = in_planes[1:3]
+            else:
+                out_planes = [planes//8 for planes in in_planes[:2]]
         else:
-            out_planes = [planes//8 for planes in in_planes[:2]]
+            out_planes = [planes for planes in in_planes[:2]]
 
     model = Encoder_Decoder(encoder, decoder_map[decoder_name], cfg,
                             in_planes=in_planes, out_planes=out_planes)
@@ -56,31 +59,31 @@ class Encoder_Decoder(nn.Module):
         self.encoder = encoder
         self.heads = cfg['model']['outputs']
         self.class_decoder = base_decoder_fn(
-            'symmetric', in_planes, out_planes)
-        self.reg_decoder = base_decoder_fn('top_down', in_planes, out_planes)
-        #self.bbox_decoder = base_decoder_fn(in_planes, out_planes)
+            in_planes, out_planes, 'topdown')
+        # self.reg_decoder = base_decoder_fn('top_down', in_planes, out_planes)
+        # self.bbox_decoder = base_decoder_fn(in_planes, out_planes)
         self.model = cfg['model']
-        if self.heads['semantic']['active']:
+        if self.heads.get('semantic', False):
             self.semantic = get_task_cls(out_planes[-1],
                                          self.heads['semantic']['out_channels'])
-        if self.heads['semantic_with_instance']['active']:
+        if self.heads.get('semantic_with_instance', False):
             self.semantic_with_instance = get_task_cls(out_planes[-1],
                                                        self.heads['semantic_with_instance']['out_channels'])
-        if self.heads['instance_contour']['active']:
+        if self.heads.get('instance_contour', False):
             num_classes = self.heads['instance_contour']['out_channels']
             self.edge_decoder = EdgeDNN(in_planes, num_classes)
-        if self.heads['instance_regression']['active']:
+        if self.heads.get('instance_regression', False):
             self.instance_regression = get_task_cls(out_planes[-1],
                                                     self.heads['instance_regression']['out_channels'])
-        if self.heads['bounding_box']['active']:
+        if self.heads.get('bounding_box', False):
             self.bounding_box_class = get_task_cls(out_planes[-1],
                                                    self.heads['bounding_box']['out_channels'])
             self.bounding_box_offsets = get_task_cls(out_planes[-1], 4)
 
-        if self.heads['instance_heatmap']['active']:
+        if self.heads.get('instance_heatmap', False):
             self.instance_heatmap = get_task_cls(out_planes[-1],
                                                  self.heads['instance_heatmap']['out_channels'])
-        if self.heads['instance_probs']['active']:
+        if self.heads.get('instance_probs', False):
             self.instance_probs = get_task_cls(out_planes[-1],
                                                self.heads['instance_probs']['out_channels'])
 
@@ -88,30 +91,33 @@ class Encoder_Decoder(nn.Module):
         outputs = {}
         size = input.shape[-2:]
         _, intermediate_result = self.encoder(input)
-        class_score, class_feats = self.class_decoder(intermediate_result)
-        reg_score, reg_feats = self.reg_decoder(intermediate_result)
-        #bbox_score, _ = self.bbox_decoder(intermediate_result)
-        if self.heads['semantic']['active']:
+        class_score = self.class_decoder(intermediate_result)
+        # reg_score = self.reg_decoder(intermediate_result)
+        # bbox_score = self.bbox_decoder(intermediate_result)
+        if self.heads.get('semantic', False):
             out = self.semantic(class_score)
             out = F.relu(out, inplace=True)
             out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['semantic'] = out
-        if self.heads['semantic_with_instance']['active']:
+        if self.heads.get('semantic_with_instance', False):
             out = self.semantic_with_instance(class_score)
             out = F.relu(out, inplace=True)
-            out = F.interpolate(out, size=size,
-                                mode='bilinear', align_corners=True)
+            out = F.interpolate(out, size=size, mode="bilinear",
+                                align_corners=False)
             outputs['semantic_with_instance'] = out
-        if self.heads['instance_contour']['active']:
-            outputs['instance_contour'] = self.edge_decoder(
-                intermediate_result)
-        if self.heads['instance_regression']['active']:
+
+        if self.heads.get('instance_contour', False):
+            out = self.edge_decoder(intermediate_result)
+            outputs['instance_contour'] = F.interpolate(out, size=size,
+                                                        mode="bilinear",
+                                                        align_corners=False)
+        if self.heads.get('instance_regression', False):
             out = self.instance_regression(class_score)
             out = F.interpolate(out, size=size,
                                 mode='bilinear', align_corners=True)
             outputs['instance_regression'] = out
-        if self.heads['bounding_box']['active']:
+        if self.heads.get('bounding_box', False):
             scale_factor = 4*self.heads['bounding_box']['scale_factor']
             if self.heads['bounding_box']['multi-scale']:
                 offsets_out = {2 ** i: None for i in range(len(reg_feats))}
@@ -121,12 +127,14 @@ class Encoder_Decoder(nn.Module):
                     offset_out = F.relu(offset_out, inplace=True)
                     offset_out = F.interpolate(offset_out,
                                                scale_factor=scale_factor,
-                                               mode='bilinear', align_corners=True)
+                                               mode="bilinear",
+                                               align_corners=False)
 
                     out = self.bounding_box_class(reg_feats[i])
                     out = F.relu(out, inplace=True)
                     out = F.interpolate(out, scale_factor=scale_factor,
-                                        mode='bilinear', align_corners=True)
+                                        mode="bilinear",
+                                        align_corners=False)
                     offsets_out[2**i] = offset_out
                     class_out[2**i] = out
                 outputs['bounding_box'] = {
@@ -141,44 +149,23 @@ class Encoder_Decoder(nn.Module):
                 out = self.bounding_box_class(class_score)
                 out = F.relu(out, inplace=True)
                 out = F.interpolate(out, scale_factor=scale_factor,
-                                    mode='bilinear', align_corners=True)
+                                    mode="bilinear",
+                                    align_corners=False)
                 outputs['bounding_box'] = {
-                    'class': out, 'offsets': offsets_out}
+                    'class': out, 'offsets': offset_out}
 
-        if self.heads['instance_heatmap']['active']:
+        if self.heads.get('instance_heatmap', False):
             out = self.instance_heatmap(reg_score)
-            out = F.interpolate(out, size=size,
-                                mode='bilinear', align_corners=True)
+            out = F.interpolate(
+                out, size=size, mode="bilinear",
+                align_corners=False)
             outputs['instance_heatmap'] = out
-        if self.heads['instance_probs']['active']:
+        if self.heads.get('instance_probs', False):
             out = self.instance_probs(class_score)
             out = F.relu(out, inplace=True)
-            out = F.interpolate(out, size=size,
-                                mode='bilinear', align_corners=True)
+            out = F.interpolate(
+                out, size=size, mode="bilinear",
+                align_corners=False)
             outputs['instance_probs'] = out
 
         return outputs  # Size = (N, n_class, x.H/1, x.W/1)
-
-    def _sliced_concat(self, res1, res2, res3, res5, num_classes):
-        out_dim = num_classes * 4
-        out_tensor = Variable(torch.FloatTensor(
-            res1.size(0), out_dim, res1.size(2), res1.size(3))).cuda()
-        class_num = 0
-        for i in range(0, out_dim, 4):
-            out_tensor[:, i, :, :] = res5[:, class_num, :, :]
-            # It needs this trick for multibatch
-            out_tensor[:, i + 1, :, :] = res1[:, 0, :, :]
-            out_tensor[:, i + 2, :, :] = res2[:, 0, :, :]
-            out_tensor[:, i + 3, :, :] = res3[:, 0, :, :]
-            class_num += 1
-        return out_tensor
-
-    def _normalize(self, out):
-        out_tensor = torch.zeros_like(out)
-        n = out.size(0)
-        for i in range(0, n):
-            out_tensor[i, :, :, :] = out[i, :, :, :] - \
-                torch.min(out[i, :, :, :])
-            if torch.max(out[i, :, :, :]) != 0:
-                out_tensor[i, :, :, :] /= torch.max(out[i, :, :, :])
-        return out_tensor

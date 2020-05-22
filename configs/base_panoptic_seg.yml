@@ -1,0 +1,115 @@
+tasks: # for dataloaders
+  semantic:
+    active: True
+    type: long
+  instance:
+    active: True
+    type: float
+
+postprocs:
+  panoptic:
+    active: True
+    inputs:
+      semantic:
+        active: True
+      instance_contour:
+        active: True
+        binary: True
+    metric: panoptic_metrics
+
+data:
+  dataset: Cityscapes
+  root_path: /home/sumche/datasets/cityscapes
+  im_size: &im_size 1024
+  random_scaling: !!python/tuple &random_scaling [0.5, 1.0]
+  val_im_size: &val_im_size 1024
+  transforms:
+    train:
+      input:
+        Resize:
+          flag: &resize False
+          size: *val_im_size
+        RandomCrop:
+          flag: &rand_crop False
+          size: *im_size
+        RandomResizedCrop:
+          flag: &rand_resize False
+          size: *im_size
+          scale: *random_scaling
+        RandomHorizontalFlip:
+          flag: &rand_flip True
+        ColorJitter:
+          flag: &jitter False
+          brightness: 0.25
+          contrast: 0.25
+          saturation: 0.25
+          hue: 0.25
+        ToTensor:
+          flag: &to_tensor True
+        Normalize:
+          flag: &norm False
+          mean: [0.485, 0.456, 0.406]
+          std: [0.229, 0.224, 0.225]
+      target:
+        Resize:
+          flag: *resize
+          size: *val_im_size
+        RandomCrop:
+          flag: *rand_crop
+          size: *im_size
+        RandomResizedCrop:
+          flag: *rand_resize
+          size: *im_size
+          scale: *random_scaling
+        RandomHorizontalFlip:
+          flag: *rand_flip
+        ToTensor:
+          flag: *to_tensor
+    val:
+      input:
+        Resize:
+          flag: *resize
+          size: *val_im_size
+        ToTensor:
+          flag: *to_tensor
+        Normalize:
+          flag: *norm
+          mean: [0.485, 0.456, 0.406]
+          std: [0.229, 0.224, 0.225]
+      target:
+        Resize:
+          flag: *resize
+          size: *val_im_size
+        ToTensor:
+          flag: *to_tensor
+
+params:
+  savelogs: True
+  RandomChoiceResize:
+    choices: [800, 832, 864, 896, 928, 960, 992, 1024]
+  update_interval: 8 # change with train batch size. Set such that update_interval*batch_size = 32
+  batchsize: &batch_size 4
+  n_workers: &n_workers 4
+  multigpu: True
+  gpu_id: 1
+  print_interval: 10
+  resume: True
+  early_stop: False
+  save_criteria: metric
+  patience: 100
+  epochs: 200
+  train:
+    batch_size: *batch_size
+    shuffle: True
+    n_workers: *n_workers
+    optimizer:
+      name: sgd
+      lr: 0.01
+      momentum: 0.9
+    scheduler:
+      name: MultiStepLR
+      milestones: [100, 150, 200]
+  val:
+    batch_size: 8
+    shuffle: True
+    n_workers: *n_workers

@@ -1,0 +1,25 @@
+base: configs/base_panoptic_seg.yml
+experiment_name: panoptic_seg_contour_binary
+model:
+  arch: encoder_decoder # Shared encoder and independent decoders
+  encoder: resnet50
+  decoder: fpn #fpn or DeepLabv3
+  pretrained_path: /home/sumche/results
+  loss_fn: fixed # fixed, uncertainty etc
+  outputs:
+    semantic:
+      active: &semantic_active True
+      out_channels: 19
+      loss: cross_entropy2d
+      loss_weight: 1.0
+      metric: classification_metrics
+      postproc: argmax
+    instance_contour:
+      active: &contour_active True
+      binary: True
+      out_channels: 1
+      loss: weighted_binary_cross_entropy
+      loss_weight: 10.0
+      metric: binary_metrics 
+      postproc: binary_class
+      conf_thresh: 0.5

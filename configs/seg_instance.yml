@@ -1,4 +1,4 @@
-experiment_name: bbox_panoptic
+experiment_name: panoptic_seg_contour
 model:
   arch: encoder_decoder # Shared encoder and independent decoders
   encoder: resnet50
@@ -21,21 +21,23 @@ model:
       metric: classification_metrics
       postproc: argmax
     instance_contour:
-      active: &contour_active False
+      active: &contour_active True
+      binary: False
       out_channels: 1
-      loss: weighted_binary_cross_entropy
-      loss_weight: 1.0
-      metric: classification_metrics # TODO: panoptic_metrics
-      postproc: argmax
+      loss: focal_loss #weighted_binary_cross_entropy
+      loss_weight: 0.001
+      metric: classification_metrics #binary_metrics # TODO: panoptic_metrics
+      postproc: argmax #binary_class
+      conf_thresh: 0.5
     instance_regression:
-      active: &regression_active True
+      active: &regression_active False
       out_channels: 2
       loss: huber_loss
       loss_weight: 1.0
       metric: None
       postproc: None
     bounding_box:
-      active: &bbox_active True
+      active: &bbox_active False
       multi-scale: False
       out_channels: 9
       loss: bbox_loss
@@ -76,12 +78,6 @@ postprocs:
         active: *semantic_active
       instance_contour:
         active: *contour_active
-      instance_regression:
-        active: *regression_active
-      instance_heatmaps:
-        active: *heatmap_active
-      instance_probs:
-        active: *probs_active
     metric: panoptic_metrics
 
 data:
@@ -152,8 +148,8 @@ data:
 
 params:
   savelogs: True
-  batchsize: &batch_size 4
-  n_workers: &n_workers 8
+  batchsize: &batch_size 32
+  n_workers: &n_workers 4
   multigpu: True
   gpu_id: 1
   print_interval: 10

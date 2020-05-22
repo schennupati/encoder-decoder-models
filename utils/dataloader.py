@@ -25,7 +25,7 @@ def get_dataset(cfg, split='train', mode='fine', target_type='semantic',
     return dataset
 
 
-def get_dataloaders(cfg):
+def get_dataloaders(cfg, splits=['train', 'val'], val_batch_size=None):
 
     data_loaders = {}
     target_type = []
@@ -37,13 +37,18 @@ def get_dataloaders(cfg):
 
     target_type = target_type[0] if len(target_type) == 1 else target_type
 
-    for split in ['train', 'val']:
+    for split in splits:
         params = cfg['params'][split]
+        batch_size = params['batch_size']
+        if split == 'val':
+            if val_batch_size is None:
+                val_batch_size = params['batch_size']
+            batch_size = val_batch_size
         dataset = get_dataset(cfg['data'], split,
                               target_type=target_type, transforms=transforms)
         data_loaders[split] = \
             torch.utils.data.DataLoader(dataset,
-                                        batch_size=params['batch_size'],
+                                        batch_size=batch_size,
                                         shuffle=params['shuffle'],
                                         num_workers=params['n_workers'])
     return data_loaders

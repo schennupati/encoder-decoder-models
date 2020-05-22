@@ -5,6 +5,8 @@ import torch
 import numpy as np
 import matplotlib
 import torch.nn.functional as F
+from torchvision import transforms
+
 from utils.im_utils import decode_segmap, labels, inst_labels, prob_labels, \
     get_color_inst, to_rgb
 import cv2
@@ -33,6 +35,7 @@ def add_input_to_writer(inputs, writer, epoch, state=TRAIN, sample_idx=0,
     name_to_writer = INPUT_WRITER_NAME.format(state=state)
     name_to_save = INPUT_SAVE_NAME.format(epoch=epoch, state=state)
     img = inputs[sample_idx, ...].squeeze()
+    img = img_denorm(img)
     writer.add_image(name_to_writer, img, epoch, dataformats=dataformats)
     if save_to_disk:
         save_image_to_disk(img, name_to_save, sample_idx, dataformats)
@@ -89,9 +92,12 @@ def write_task_data(data, writer, epoch, task=SEMANTIC,
         save_images_to_disk {bool} -- Whether to save images to disk
          (default: {False})
     """
-    data = get_sample(data, task, data_type, sample_idx)
-    rgb = inputs[sample_idx, ...].squeeze()
-    rgb = normalize(rgb, scale_factor)
+    if task != 'panoptic':
+        data = get_sample(data, task, data_type, sample_idx)
+        rgb = inputs[sample_idx, ...].squeeze()
+    else:
+        rgb = inputs.squeeze()
+    rgb = de_normalize(rgb, scale_factor)
     data = data.squeeze() if not isinstance(data, list) else data
     if len(data) != 0:
         output = generate_task_visuals(data, task, rgb)
@@ -173,10 +179,15 @@ def generate_task_visuals(data, task, rgb=None):
     elif task == 'bounding_box':
         data = get_bbox(rgb.astype(np.uint8), data)
     elif task == PANOPTIC:
-        data = data[..., 0] + \
-            256 * data[..., 1] + \
-            256 * 256 * data[..., 2]
-        data = to_rgb(data)
+        seg = decode_segmap(data[..., 0], nc=19, labels=labels)
+        mask = (data[..., 0] >= 11).astype(np.uint8)
+        inst = to_rgb(int(data=data[..., 0] +
+                          256 * data[..., 1] +
+                          256 * 256 * data[..., 2])*mask)
+        for i in range(3):
+            seg[..., i] = seg[..., i]*(1-mask)
+
+        data = seg + inst
     else:
         data = data
     return data
@@ -223,7 +234,7 @@ def save_image_to_disk(image, name, sample_idx=0,
     elif len(shape) == 2:
         image = image.unsqueeze(0)
     image = image.permute(1, 2, 0) if dataformats == CHW else image
-    image = image.numpy() if torch.is_tensor(image) else image
+    image = image.cpu().numpy() if torch.is_tensor(image) else image
     fname = os.path.join(path, name + PNG)
     matplotlib.image.imsave(fname, (image*225).astype(np.uint8))
 
@@ -258,12 +269,31 @@ def add_images_to_writer(inputs, predictions, targets, writer,
                              scale_factor=scale_factor)
 
 
-def normalize(rgb, scale_factor):
+def de_normalize(rgb, scale_factor=1.0):
     rgb = F.interpolate(rgb.unsqueeze(1), scale_factor=scale_factor,
                         mode='bilinear', align_corners=True)
+
     rgb = rgb.cpu().numpy() if torch.is_tensor(rgb) else to_rgb
     rgb = rgb.squeeze().transpose(1, 2, 0)
     rgb *= [0.229, 0.224, 0.225]
     rgb += [0.485, 0.456, 0.406]
     rgb *= 255
     return rgb
+
+
+def img_denorm(rgb, mean=None, std=None):
+    # for ImageNet the mean and std are:
+    if mean is None and std is None:
+        mean = np.asarray([0.485, 0.456, 0.406])
+        std = np.asarray([0.229, 0.224, 0.225])
+
+    denormalize = transforms.Normalize((-1 * mean / std), (1.0 / std))
+
+    res = rgb.squeeze(0)
+    res = denormalize(res)
+
+    # Image needs to be clipped since the denormalize function will map some
+    # values below 0 and above 1
+    res = torch.clamp(res, 0, 1)
+
+    return res

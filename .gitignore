@@ -106,3 +106,8 @@ venv.bak/
 # Ignore datasets
 datasets/Cityscapes/
 results/
+.vscode/settings.json
+
+.DS_Store
+
+.vscode/launch.json

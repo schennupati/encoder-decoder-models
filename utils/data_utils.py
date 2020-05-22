@@ -1,5 +1,6 @@
 """data utilities to support target conversion, postprocs etc."""
-
+from scipy import ndimage as nd
+import os
 import copy
 import torch
 import numpy as np
@@ -12,7 +13,8 @@ import torch.nn.functional as F
 import torchvision
 
 from utils.im_utils import labels, prob_labels, trainId2label, id2label, \
-    decode_segmap, inst_labels, name2label, get_color_inst, instance_trainId
+    decode_segmap, inst_labels, name2label, get_color_inst, instance_trainId, \
+    to_rgb
 from utils.constants import TASKS, MODEL, OUTPUTS, TYPE, SEMANTIC, INSTANCE, \
     DISPARITY, PANOPTIC, ACTIVE, OUTPUTS_TO_TASK, INSTANCE_REGRESSION, \
     INSTANCE_PROBS, INSTANCE_HEATMAP, INSTANCE_CONTOUR, POSTPROCS, INPUTS, \
@@ -27,8 +29,15 @@ class TargetGenerator():
         self.tasks = list(get_active_tasks(cfg[MODEL][OUTPUTS]).keys())
         self.labels = {}
         self.postprocs = postprocs
-        self.scale_factor = cfg[MODEL][OUTPUTS]['bounding_box']['scale_factor']
+        if cfg[MODEL][OUTPUTS].get('bounding_box', None):
+            self.scale_factor = cfg[MODEL][OUTPUTS]['bounding_box']['scale_factor']
+        else:
+            self.scale_factor = 1
         self.min_pixel_ratio = min_pixel_ratio
+        if cfg[MODEL][OUTPUTS].get(INSTANCE_CONTOUR, None):
+            self.binary = cfg[MODEL][OUTPUTS][INSTANCE_CONTOUR]['binary']
+        else:
+            self.binary = False
 
     def prepare_targets(self, inst):
         if len(inst.shape) == 3:
@@ -91,16 +100,21 @@ class TargetGenerator():
         if 'semantic' in self.tasks:
             self.labels.update(
                 {'semantic': torch.tensor(self.semantic_seg).cuda()})
+        if 'instance_contour' in self.tasks:
+            self.labels.update(
+                {'instance_contour': torch.tensor(self.instance_cnt).cuda()})
         if 'semantic_with_instance' in self.tasks:
             self.labels.update(
-                {'semantic_with_instance':
+                {'semantic':
                  torch.tensor(self.semantic_seg).cuda(),
+                 'instance_contour':
+                 torch.tensor(self.instance_cnt).cuda(),
                  'touching_boundaries':
                  torch.tensor(self.touching_cnt).cuda()})
         if ('panoptic' in self.tasks) or self.postprocs:
             self.labels.update(
-                {'panoptic': {'panoptic': self.panoptic_seg,
-                              'segmInfo': self.segmInfo}})
+                {'panoptic': {PANOPTIC_IMAGE: self.panoptic_seg,
+                              SEGMENT_INFO: self.segmInfo}})
         if 'instance_regression' in self.tasks:
             self.labels.update(
                 {'instance_regression':
@@ -152,16 +166,23 @@ class TargetGenerator():
                 isCrowd = 0
 
             if labelInfo.hasInstances and segmentId > 1000:
-                self.instance_cnt = get_contours(self.instance_cnt,
-                                                 inst, segmentId) \
-                    if self.instance_cnt is not None else None
-                (self.bbox_offsets, self.bbox_labels,
-                 self.loss_mask, self.bboxes) =\
-                    get_bbox_offsets(self.bbox_offsets, self.bbox_labels,
-                                     self.bbox_loss_mask, self.bboxes,
-                                     inst, segmentId, self.min_area,
-                                     self.min_height, self.min_width) \
-                    if self.bbox_offsets is not None else None
+                if self.instance_cnt is not None:
+                    instance_cnt = get_contours(self.instance_cnt,
+                                                inst, segmentId)
+                    if not self.binary:
+                        instance_cnt[instance_cnt != 0] = \
+                            instance_trainId[segmentId // 1000]
+                    self.instance_cnt = instance_cnt
+
+                if self.bbox_offsets is not None:
+                    (self.bbox_offsets, self.bbox_labels,
+                     self.loss_mask, self.bboxes) =\
+                        get_bbox_offsets(self.bbox_offsets, self.bbox_labels,
+                                         self.bbox_loss_mask, self.bboxes,
+                                         inst, segmentId, self.min_area,
+                                         self.min_height, self.min_width)
+                else:
+                    pass
                 self.centroids = get_centroids(self.centroids,
                                                self.vec_loss_mask,
                                                inst,
@@ -260,7 +281,7 @@ def get_centroids_img(centroids_t, vec_loss_mask, mask, min_area):
     # print(np.mean(xs), np.mean(ys))
     centroids_t[0, xs, ys] = np.mean(xs)
     centroids_t[1, xs, ys] = np.mean(ys)
-    vec_loss_mask[xs, ys] = 1000/area
+    vec_loss_mask[xs, ys] = 100/(np.min((area, 99))+1)
     # centroids_t[0, xs, ys] = int(bbox[0] + bbox[2]/2)
     # centroids_t[1, xs, ys] = int(bbox[1] + bbox[3]/2)
 
@@ -319,14 +340,14 @@ def get_bbox_offset_img(offsets, labels, loss_mask, bbox_img, mask, segmentId,
     if area == 0:
         return offsets, labels, loss_mask, bbox_img
     bbox = get_bbox(mask)
-    # if bbox[2] >= min_h and bbox[3] >= min_w:
-    pt1, pt2 = get_corners(bbox)
-    xmin, xmax, ymin, ymax = get_bbox_support_region(bbox)
-    offsets[:, xmin:xmax, ymin:ymax] = \
-        get_offsets_in_support_region(xmin, xmax, ymin, ymax, bbox)
-    labels[xmin:xmax, ymin:ymax] = instance_trainId[segmentId//1000]
-    loss_mask[xmin:xmax, ymin:ymax] = 1000 / area
-    bbox_img.append([pt1[1], pt1[0], pt2[1], pt2[0]])
+    if bbox[2] >= min_h and bbox[3] >= min_w:
+        pt1, pt2 = get_corners(bbox)
+        xmin, xmax, ymin, ymax = get_bbox_support_region(bbox)
+        offsets[:, xmin:xmax, ymin:ymax] = \
+            get_offsets_in_support_region(xmin, xmax, ymin, ymax, bbox)
+        labels[xmin:xmax, ymin:ymax] = instance_trainId[segmentId//1000]
+        loss_mask[xmin:xmax, ymin:ymax] = 100/(np.min((area, 99))+1)
+        bbox_img.append([pt1[1], pt1[0], pt2[1], pt2[0]])
 
     return offsets, labels, loss_mask, bbox_img
 
@@ -405,18 +426,11 @@ def get_offsets_in_support_region(xmin, xmax, ymin, ymax, bbox):
     return offsets
 
 
-def get_cfg(config):
-    with open(config) as fp:
-        cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    for task in list(cfg[TASKS].keys()):
-        if not cfg[TASKS][task][ACTIVE]:
-            del cfg[TASKS][task]
-    return cfg
-
-
 def generate_semantic_with_instance(semantic_seg, touching_cnt,
                                     instance_cnt, semantic_cnt):
     for value in np.unique(semantic_seg):
+        if value == 255.0:
+            continue
         if id2label[value].hasInstances:
             semantic_cnt = get_contours(semantic_cnt, semantic_seg, value)
 
@@ -430,31 +444,10 @@ def generate_semantic_with_instance(semantic_seg, touching_cnt,
     # self.semantic_seg[self.instance_cnt != 0] = \
     #    name2label['boundary'].trainId
     touching_cnt = instance_cnt - semantic_cnt
-    semantic_seg[touching_cnt != 0] = name2label['t-boundary'].trainId
+    semantic_seg[instance_cnt != 0] = name2label['boundary'].trainId
     touching_cnt[touching_cnt != 0] = 10
     touching_cnt[touching_cnt == 0] = 1
     return semantic_seg, touching_cnt
-
-
-def get_active_tasks(model_cfg):
-    active_outputs_cfg = copy.deepcopy(model_cfg)
-    for task in list(model_cfg.keys()):
-        if not model_cfg[task][ACTIVE]:
-            del active_outputs_cfg[task]
-
-    return active_outputs_cfg
-
-
-def map_outputs_to_task(output):
-    return get_key(OUTPUTS_TO_TASK, output)
-
-
-def get_key(_dict, val):
-    for key, value in _dict.items():
-        if val == value:
-            return key
-
-    return "key doesn't exist"
 
 
 def get_class_weights_from_data(loader, num_classes, cfg, task):
@@ -550,6 +543,16 @@ def get_predictions(logits, cfg, targets):
     for task in logits.keys():
         if cfg[task][POSTPROC] == ARGMAX:
             predictions[task] = torch.argmax(logits[task], dim=1)
+        elif cfg[task][POSTPROC] == "binary_class":
+            conf_thresh = cfg[task]['conf_thresh']
+            predictions[task] = \
+                (torch.sigmoid(logits[task]) > conf_thresh).int()
+        elif cfg[task][POSTPROC] == 'semantic_with_instance':
+            pred = torch.argmax(logits[task], dim=1)
+            predictions[SEMANTIC] = torch.argmax(logits[task][:, :-1, ...],
+                                                 dim=1)
+            predictions[INSTANCE_CONTOUR] = (
+                pred == cfg[task]['out_channels']-1).int()
         elif cfg[task][POSTPROC] == 'bbox':
             predictions[task] = \
                 get_bboxes_filtered(logits[task], targets[task],
@@ -559,26 +562,6 @@ def get_predictions(logits, cfg, targets):
         else:
             predictions[task] = logits[task]
     return predictions
-
-
-def post_process_predictions(predictions, post_proc_cfg):
-    outputs = {}
-    for task in post_proc_cfg.keys():
-        if post_proc_cfg[task][ACTIVE]:
-            inputs_cfg = post_proc_cfg[task][INPUTS]
-            inputs = get_active_tasks(inputs_cfg)
-            predicted_tasks = set(predictions.keys())
-            input_tasks = set(inputs.keys())
-
-            if not input_tasks.issubset(predicted_tasks):
-                raise ValueError("""Inputs to postproc are not a subset
-                                  of network predictions. Inputs: {},
-                                  prediction: {}""".format(input_tasks,
-                                                           predicted_tasks))
-
-            outputs[task] = generatePanopticFromPredictions(predictions,
-                                                            inputs)
-    return outputs
 
 
 def get_bboxes_filtered(logits, targets, scale_factor=0.25,
@@ -591,18 +574,24 @@ def get_bboxes_filtered(logits, targets, scale_factor=0.25,
             c, h, w = offsets[1].size()
             n = 1
         bboxes = {i: [] for i in range(n)}
-        scores = {i: [] for i in range(n)}
         confidence_masked = {k: None for k in confidence.keys()}
         for k, v in confidence.items():
             confidence_masked[k] = get_confidence_mask(v, conf_thresh)
 
         for i in range(n):
+            f_boxes = []
+            scores = []
             for k, v in confidence_masked.items():
-                box, score = get_bbox_filtered(offsets[k][i, ...],
-                                               v[i, ...], iou_thresh,
-                                               h, w, k)
-                bboxes[i].extend(box)
-                scores[i].extend(score)
+                f_box, score = get_bbox_filtered(offsets[k][i, ...],
+                                                 v[i, ...], iou_thresh,
+                                                 h, w, k)
+                f_boxes.extend(f_box)
+                scores.extend(score)
+            if len(f_boxes) > 1:
+                bboxes[i] = get_nms_boxes(
+                    f_boxes, torch.tensor(scores), iou_thresh)
+            else:
+                bboxes[i] = f_boxes
 
     else:
         confidence_masked = get_confidence_mask(confidence, conf_thresh)
@@ -612,12 +601,15 @@ def get_bboxes_filtered(logits, targets, scale_factor=0.25,
             c, h, w = offsets.size()
             n = 1
         bboxes = {i: [] for i in range(n)}
-        scores = {i: [] for i in range(n)}
         for i in range(n):
-            bboxes[i], scores[i] = get_bbox_filtered(offsets[i, ...],
-                                                     confidence_masked[i, ...], iou_thresh,
-                                                     h, w)
-    bboxes = get_nms_boxes(bboxes, scores, iou_thresh)
+            f_boxes, scores = get_bbox_filtered(offsets[i, ...],
+                                                confidence_masked[i, ...],
+                                                iou_thresh,
+                                                h, w)
+            if len(f_boxes) > 1:
+                bboxes[i] = get_nms_boxes(f_boxes, scores, iou_thresh)
+            else:
+                bboxes[i] = f_boxes
     return bboxes
 
 
@@ -625,7 +617,7 @@ def get_bbox_filtered(offset_img, confidence_img, iou_thresh=0.7, h=64, w=128,
                       stride=1):
     positions = torch.nonzero(confidence_img)*stride
     if positions.size()[0] == 0:
-        return []
+        return [], []
     with torch.no_grad():
         scores = confidence_img[positions[:, 0], positions[:, 1]]
         offsets = offset_img[:, positions[:, 0], positions[:, 1]]
@@ -638,9 +630,9 @@ def get_bbox_filtered(offset_img, confidence_img, iou_thresh=0.7, h=64, w=128,
         filtered_boxes = bbox_cords[keep_inds].squeeze()
         scores = scores[keep_inds].squeeze()
         if filtered_boxes.size()[0] == 0:
-            return []
+            return [], []
         if len(filtered_boxes.size()) == 1:
-            return [filtered_boxes]
+            return [filtered_boxes], [scores]
         filtered_boxes[:, [0, 2]] = torch.clamp(
             filtered_boxes[:, [0, 2]], min=0, max=h)
         filtered_boxes[:, [1, 3]] = torch.clamp(
@@ -674,3 +666,245 @@ def get_confidence_mask(confidence_img, conf_thresh=0.5):
     max_conf[class_mask == 0] = 0
     max_conf[max_conf < conf_thresh] = 0
     return max_conf
+
+
+def post_process_predictions(predictions, post_proc_cfg):
+    outputs = {}
+    for task in post_proc_cfg.keys():
+        if post_proc_cfg[task][ACTIVE]:
+            inputs_cfg = post_proc_cfg[task][INPUTS]
+            inputs = get_active_tasks(inputs_cfg)
+            predicted_tasks = set(predictions.keys())
+            input_tasks = set(inputs.keys())
+            binary = post_proc_cfg[task][INPUTS][INSTANCE_CONTOUR]['binary']
+
+            if not input_tasks.issubset(predicted_tasks):
+                raise ValueError("""Inputs to postproc are not a subset
+                                  of network predictions. Inputs: {},
+                                  prediction: {}""".format(input_tasks,
+                                                           predicted_tasks))
+
+            outputs[task] = generatePanopticFromPredictions(predictions,
+                                                            inputs, binary)
+    return outputs
+
+
+def generatePanopticFromPredictions(predictions, inputs, binary=True):
+    semantic = generateSemanticFromPredictions(predictions).squeeze()
+    mask = generateMaskFromPredicitons(predictions).squeeze()
+    instance = genrateInstanceFromPredictions(
+        predictions, semantic, mask, inputs, binary)
+
+    panoptic = semantic*(1-mask) + instance
+    # axis = plt.subplots(2, 2)[-1]
+    # axis[0, 0].imshow(decode_segmap(semantic, nc=19))
+    # axis[0, 1].imshow(to_rgb(instance))
+    # axis[1, 0].imshow(semantic*(1-mask))
+    # axis[1, 1].imshow(panoptic.squeeze())
+    # plt.show()
+    panoptic = getPanopticEval(panoptic, useTrainId=True)
+
+    return panoptic
+
+
+def genrateInstanceFromPredictions(predictions, semantic, mask,
+                                   inputs, binary=True):
+    mask = generateMaskFromPredicitons(predictions).squeeze()
+    contours = generateContoursFromPredictions(predictions).squeeze()
+
+    if INSTANCE_CONTOUR in inputs:
+        instance = getInstanceFromContour(mask, semantic, contours, binary)
+
+    return instance
+
+
+def generateSemanticFromPredictions(predictions):
+    semantic = predictions.get(SEMANTIC, None)
+    if semantic is not None:
+        return semantic.detach().cpu().numpy()
+    else:
+        raise ValueError('{} not found in {}'.format(SEMANTIC,
+                                                     predictions.keys()))
+
+
+def generateContoursFromPredictions(predictions):
+    contours = predictions.get(INSTANCE_CONTOUR, None)
+    if contours is not None:
+        return contours.detach().cpu().numpy()
+    else:
+        raise ValueError('{} not found in {}'.format(INSTANCE_CONTOUR,
+                                                     predictions.keys()))
+
+
+def generateMaskFromPredicitons(predictions):
+    semantic = generateSemanticFromPredictions(predictions)
+    # mask = predictions.get(INSTANCE_PROBS, None)
+    # if mask is None:
+    return (semantic >= 11).astype(np.uint8)
+    # return mask.detach().cpu().numpy()
+
+
+def getInstanceFromContour(mask, seg, contours, binary=True):
+    inst = np.zeros_like(seg)
+    inst = _get_instance_from_contour(mask, seg, contours, binary)
+    return inst
+
+
+def _get_instance_from_contour(mask, seg, contours, binary=True):
+    inst = np.zeros_like(seg)
+    inst_from_seg = np.zeros_like(seg)
+    for i in np.unique(seg):
+        _, inst_ = cv2.connectedComponents(((seg == i)*mask).astype(np.uint8))
+        inst_from_seg += inst_
+    if binary:
+        kernel = np.ones((2, 2), np.uint8)
+        contour_ = (contours == 1).astype(np.uint8)
+        contour = cv2.morphologyEx(contour_, cv2.MORPH_CLOSE, kernel)
+        diff = inst_from_seg * mask * (1-contour)
+        _, labels = cv2.connectedComponents(diff.astype(np.uint8))
+        inst = seg * mask * (1 - contour) * 1000 + labels
+        # axis = plt.subplots(4, 2)[-1]
+        # axis[0, 0].imshow(decode_segmap(seg, nc=19))
+        # axis[0, 1].imshow(decode_segmap(diff, nc=19))
+        # axis[1, 0].imshow(mask)
+        # axis[1, 1].imshow(to_rgb(inst_from_seg))
+        # axis[2, 0].imshow(contour_)
+        # axis[2, 1].imshow(contour)
+        # axis[3, 0].imshow(to_rgb(inst))
+        for i in np.unique(inst):
+            mask_ = (inst == i).astype(np.uint8)
+            area = np.sum(mask_)
+            if area < 100:
+                inst[inst == i] = 0
+        inst = fill(inst, (inst == 0)) * mask
+
+        # axis[3, 1].imshow(to_rgb(inst))
+
+        plt.show()
+    else:
+        for i in np.unique(contours):
+            if i != 0:
+                kernel = np.ones((2, 2), np.uint8)
+                contour = (contours == i).astype(np.uint8)
+                contour = cv2.morphologyEx(contour, cv2.MORPH_CLOSE, kernel)
+                diff = inst_from_seg * mask * (1 - contour)
+                diff = fill(diff, (contour == 1)) * mask
+                _, labels = cv2.connectedComponents(diff.astype(np.uint8))
+                inst += seg * mask * (1-contour) * 1000 + labels
+
+        for i in np.unique(inst):
+            mask_ = (inst == i).astype(np.uint8)
+            area = np.sum(mask_)
+            if area < 100:
+                inst[inst == i] = 0
+        inst = fill(inst, (inst == 0)) * mask
+    return inst
+
+
+def getPanopticEval(inst, useTrainId=False):
+    panoptic_seg = np.zeros((inst.shape + (3,)), dtype=np.uint8)
+    if torch.is_tensor(inst):
+        inst = inst.numpy()
+    segmentIds = np.unique(inst)
+    segmInfo = []
+    for segmentId in segmentIds:
+        if segmentId < 1000:
+            semanticId = segmentId
+            isCrowd = 1
+        else:
+            semanticId = segmentId // 1000
+            isCrowd = 0
+
+        if useTrainId:
+            labelInfo = trainId2label[semanticId]
+        else:
+            labelInfo = id2label[semanticId]
+        categoryId = labelInfo.trainId
+        if labelInfo.ignoreInEval:
+            continue
+        if not labelInfo.hasInstances:
+            isCrowd = 0
+
+        mask = inst == segmentId
+        color = [segmentId % 256, segmentId // 256, segmentId // 256 // 256]
+        panoptic_seg[mask] = color
+
+        area = np.sum(mask.astype(np.uint8))  # segment area computation
+
+        # bbox computation for a segment
+        hor = np.sum(mask, axis=0)
+        hor_idx = np.nonzero(hor)[0]
+        x = hor_idx[0]
+        width = hor_idx[-1] - x + 1
+        vert = np.sum(mask, axis=1)
+        vert_idx = np.nonzero(vert)[0]
+        y = vert_idx[0]
+        height = vert_idx[-1] - y + 1
+        bbox = [int(x), int(y), int(width), int(height)]
+        segmInfo.append({"id": int(segmentId),
+                         "category_id": int(categoryId),
+                         "area": int(area),
+                         "bbox": bbox,
+                         "iscrowd": isCrowd})
+        panoptic = {PANOPTIC_IMAGE: panoptic_seg,
+                    SEGMENT_INFO: segmInfo}
+
+    return panoptic
+
+
+def fill(data, invalid=None):
+    """
+    Replace the value of invalid 'data' cells (indicated by 'invalid')
+    by the value of the nearest valid data cell
+
+    Input:
+        data:    numpy array of any dimension
+        invalid: a binary array of same shape as 'data'. True cells set where data
+                 value should be replaced.
+                 If None (default), use: invalid  = np.isnan(data)
+
+    Output:
+        Return a filled array.
+    """
+
+    if invalid is None:
+        invalid = np.isnan(data)
+
+    ind = nd.distance_transform_edt(
+        invalid, return_distances=False, return_indices=True)
+    return data[tuple(ind)]
+
+
+def get_cfg(path, config):
+    config_path = os.path.join(path, config)
+    with open(config_path) as fp:
+        cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        base_config_path = os.path.join(path, cfg['base'])
+        with open(base_config_path) as fp:
+            base_cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        base_cfg.update(cfg)
+    for task in list(base_cfg[TASKS].keys()):
+        if not base_cfg[TASKS][task][ACTIVE]:
+            del base_cfg[TASKS][task]
+    return base_cfg
+
+
+def get_active_tasks(model_cfg):
+    active_outputs_cfg = copy.deepcopy(model_cfg)
+    for task in list(model_cfg.keys()):
+        if not model_cfg[task][ACTIVE]:
+            del active_outputs_cfg[task]
+
+    return active_outputs_cfg
+
+
+def map_outputs_to_task(output):
+    return get_key(OUTPUTS_TO_TASK, output)
+
+
+def get_key(_dict, val):
+    for key, value in _dict.items():
+        if val == value:
+            return key
+
+    return "key doesn't exist"

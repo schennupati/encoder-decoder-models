@@ -3,6 +3,9 @@ import argparse
 import logging
 import os
 
+import numpy as np
+import torch
+
 from utils.constants import TRAIN, VAL
 from utils.data_utils import get_cfg
 from utils.experiment_utils import ExperimentLoop
@@ -25,10 +28,10 @@ def main(cfg, mode):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="config")
     parser.add_argument("--config", nargs="?",
-                        type=str, default="configs/seg_instance.yml",
+                        type=str, default="configs/panoptic_seg_contour_binary.yml",
                         help="Configuration to use")
     parser.add_argument("--mode", nargs="?", choices=['train', 'val'],
-                        type=str, default='train',
+                        type=str, default='val',
                         help="train/val mode")
     parser.add_argument("--debug", choices=['True', 'False'], type=str,
                         default=False, help='Debug Mode toggle on/off.')
@@ -41,7 +44,6 @@ if __name__ == "__main__":
                             level=logging.INFO)
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    config_path = os.path.join(dir_path, args.config)
-    cfg = get_cfg(config_path)
+    cfg = get_cfg(dir_path, args.config)
     mode = args.mode
     main(cfg, mode)
