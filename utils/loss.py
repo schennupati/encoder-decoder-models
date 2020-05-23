@@ -72,9 +72,10 @@ class WeightedBinaryCrossEntropy(nn.Module):
 
 class FocalLoss(nn.Module):
 
-    def __init__(self, ignore_index=255):
+    def __init__(self, ignore_index=255, gamma=1):
         super(FocalLoss, self).__init__()
         self.ignore_index = ignore_index
+        self.gamma = gamma
 
     def forward(self, input, target):
         n, c, h, w = input.size()
@@ -84,7 +85,7 @@ class FocalLoss(nn.Module):
                                   ignore_index=self.ignore_index.cuda(),
                                   reduction='none')
         focal_loss = ((1 - F.softmax(input, dim=1).permute(
-            0, 2, 3, 1).contiguous().view(-1, c))**gamma).squeeze() * ce_loss
+            0, 2, 3, 1).contiguous().view(-1, c))**self.gamma).squeeze() * ce_loss
         return focal_loss.mean()
 
 
@@ -99,18 +100,18 @@ class DualityCELoss(nn.Module):
         input, target = flatten_data(input, target)
         target = target.long()
         ce_loss = F.cross_entropy(input, target, weight=self.weights.cuda(),
-                                  ignore_index=self.ignore_index.cuda())
-        smooth_l1_loss =\
-            huber_loss((torch.argmax(input, dim=1) == input.size(1)).float(),
-                       (target == 19).float())
+                                  ignore_index=self.ignore_index)
+        smooth_l1_loss = huber_loss((torch.argmax(input, dim=1) == input.size(1)).float(),
+                                    (target == 19).float())
         return ce_loss + 50*smooth_l1_loss
 
 
 class DualityFocalLoss(nn.Module):
 
-    def __init__(self, ignore_index=255):
+    def __init__(self, ignore_index=255, gamma=1):
         super(DualityFocalLoss, self).__init__()
         self.ignore_index = ignore_index
+        self.gamma = gamma
 
     def forward(self, input, target):
         n, c, h, w = input.size()
@@ -118,14 +119,13 @@ class DualityFocalLoss(nn.Module):
         target = target.long()
         ce_loss = F.cross_entropy(input, target,
                                   weight=None,
-                                  ignore_index=self.ignore_index.cuda(),
+                                  ignore_index=self.ignore_index,
                                   reduction='none')
         focal_loss = ((1 - F.softmax(input, dim=1).permute(
-            0, 2, 3, 1).contiguous().view(-1, c))**gamma).squeeze() * ce_loss
+            0, 2, 3, 1).contiguous().view(-1, c))**self.gamma).squeeze() * ce_loss
 
-        smooth_l1_loss =\
-            huber_loss((torch.argmax(input, dim=1) == input.size(1)).float(),
-                       (target == input.size(1)).float())
+        smooth_l1_loss = huber_loss((torch.argmax(input, dim=1) == input.size(1)).float(),
+                                    (target == input.size(1)).float())
         return focal_loss.mean() + 50*smooth_l1_loss
 
 
