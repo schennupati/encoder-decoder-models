@@ -57,7 +57,8 @@ class MultiTaskLoss(nn.Module):
             elif loss_fn == 'dualityfocalloss':
                 self.loss_fn[task] = DualityFocalLoss()
             elif loss_fn == 'dualityceloss':
-                self.loss_fn[task] = DualityCELoss()
+                self.loss_fn[task] = DualityCELoss(
+                    self.weights[task].cuda(), ignore_index=255)
             elif loss_fn == 'huber_loss':
                 self.loss_fn[task] = HuberLoss()
             elif loss_fn == 'bbox_loss':

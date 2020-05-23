@@ -167,12 +167,12 @@ class TargetGenerator():
 
             if labelInfo.hasInstances and segmentId > 1000:
                 if self.instance_cnt is not None:
-                    instance_cnt = get_contours(self.instance_cnt,
-                                                inst, segmentId)
-                    if not self.binary:
-                        instance_cnt[instance_cnt != 0] = \
-                            instance_trainId[segmentId // 1000]
-                    self.instance_cnt = instance_cnt
+                    self.instance_cnt = get_contours(self.instance_cnt,
+                                                     inst, segmentId, self.binary)
+                    # if not self.binary:
+                    #     instance_cnt[instance_cnt != 0] = \
+                    #         instance_trainId[segmentId // 1000]
+                    # self.instance_cnt = instance_cnt
 
                 if self.bbox_offsets is not None:
                     (self.bbox_offsets, self.bbox_labels,
@@ -288,25 +288,28 @@ def get_centroids_img(centroids_t, vec_loss_mask, mask, min_area):
     return centroids_t
 
 
-def get_contours(img, inst, segmentId):
+def get_contours(img, inst, segmentId, binary):
     if len(inst.shape) == 3:
         n = inst.shape[0]
         for i in range(n):
             mask = (inst[i, ...] == segmentId)
-            img[i, ...] = get_contour_img(img[i, ...].squeeze(), mask)
+            img[i, ...] = get_contour_img(
+                img[i, ...].squeeze(), mask, segmentId, binary)
         return img
     else:
         mask = (inst == segmentId)
-        return get_contour_img(img, mask)
+        return get_contour_img(img, mask, segmentId, binary)
 
 
-def get_contour_img(img, mask):
+def get_contour_img(img, mask, segmentId, binary):
     # kernel = np.ones((2, 2), np.uint8)
     mask = mask.numpy() if torch.is_tensor(mask) else mask
     mask = mask.astype(np.uint8)
     cnts, _ = cv2.findContours(mask, cv2.RETR_TREE,
                                cv2.CHAIN_APPROX_SIMPLE)
     img = cv2.drawContours(img, cnts, -1, 1, 2)  # .astype(np.uint8)
+    if not binary:
+        img[img != 0] = instance_trainId[segmentId // 1000]
     # img =cv2.dilate(img, kernel, iterations=1)
     return img
 

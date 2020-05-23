@@ -219,13 +219,13 @@ class ExperimentLoop():
                 loss_str += TASK_LOSS.format(task, task_loss.avg)
             logging.info(loss_str + 'Time: {:05.3f}'.format(train_s))
 
-            if (epoch + 1) % self.print_interval == 0 and epoch > 0:
-                self.mode = VAL
-                self.val_generator = TargetGenerator(self.cfg, postprocs=True)
-                self.validation_step(epoch)
-                self.mode = TRAIN
-            else:
-                self.validation_step(epoch)
+            # if (epoch + 1) % self.print_interval == 0 and epoch > 0:
+            #     self.mode = VAL
+            #     self.val_generator = TargetGenerator(self.cfg, postprocs=True)
+            #     self.validation_step(epoch)
+            #     self.mode = TRAIN
+            # else:
+            self.validation_step(epoch)
 
             self.train_running_loss.reset()
             self.train_loss_meters.reset()
