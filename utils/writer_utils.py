@@ -181,9 +181,10 @@ def generate_task_visuals(data, task, rgb=None):
     elif task == PANOPTIC:
         seg = decode_segmap(data[..., 0], nc=19, labels=labels)
         mask = (data[..., 0] >= 11).astype(np.uint8)
-        inst = to_rgb(int(data=data[..., 0] +
-                          256 * data[..., 1] +
-                          256 * 256 * data[..., 2])*mask)
+        inst = (data[..., 0] +
+                256 * data[..., 1] +
+                256 * 256 * data[..., 2]).astype(np.int16)
+        inst = to_rgb(inst*mask)
         for i in range(3):
             seg[..., i] = seg[..., i]*(1-mask)
 

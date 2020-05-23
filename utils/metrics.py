@@ -104,7 +104,7 @@ class panopticMetrics(object):
                 self.metrics[metric].update({label.trainId: 0})
         for size in ['s', 'm', 'l']:
             for metric in metric_items:
-                self.metrics[metric].update({label.trainId: 0})
+                self.size_metrics[metric].update({size: 0})
 
     def rgb2id(self, color):
         if isinstance(color, np.ndarray) and len(color.shape) >= 3:
@@ -168,15 +168,11 @@ class panopticMetrics(object):
         mean_metrics = {"Mean PQ": self.get_mean_metric(pq),
                         "Mean RQ": self.get_mean_metric(sq),
                         "Mean SQ": self.get_mean_metric(rq),
-                        "Mean PQSt": self.get_mean_metric(pq[:11]),
-                        "Mean RQSt": self.get_mean_metric(sq[:11]),
-                        "Mean SQSt": self.get_mean_metric(rq[:11]),
-                        "Mean PQTh": self.get_mean_metric(pq[11:]),
-                        "Mean RQTh": self.get_mean_metric(sq[11:]),
-                        "Mean SQTh": self.get_mean_metric(rq[11:]),
-                        "Mean PQSmall": self.get_mean_metric(size_pq[0]),
-                        "Mean PQMedium": self.get_mean_metric(size_pq[1]),
-                        "Mean PQLarge": self.get_mean_metric(size_pq[2])}
+                        "PQSt": self.get_mean_metric(pq[:11]),
+                        "PQTh": self.get_mean_metric(pq[11:]),
+                        "PQSmall": size_pq[0],
+                        "PQMedium": size_pq[1],
+                        "PQLarge": size_pq[2]}
         class_metrics = {'pq': pq,
                          'rq': rq,
                          'sq': sq}
@@ -274,7 +270,7 @@ class panopticMetrics(object):
                 continue
             size_id = self.get_size_id(pred_seg_info['area'])
             self.metrics['fp'][pred_cat_id] += 1
-            self.size_metrics[fp][size_id] += 1
+            self.size_metrics['fp'][size_id] += 1
 
 
 class metrics:
