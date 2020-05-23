@@ -11,7 +11,8 @@ import torch.nn as nn
 import pdb
 # TODO:Implement MTL loss combinations
 from utils.loss import WeightedBinaryCrossEntropy, DualityFocalLoss, \
-    FocalLoss, BboxLoss, HuberLoss
+    FocalLoss, BboxLoss, HuberLoss, WeightedMultiClassBinaryCrossEntropy, \
+    DualityCELoss
 
 
 class MultiTaskLoss(nn.Module):
@@ -49,10 +50,14 @@ class MultiTaskLoss(nn.Module):
                     self.weights[task].cuda(), ignore_index=255)
             elif loss_fn == 'weighted_binary_cross_entropy':
                 self.loss_fn[task] = WeightedBinaryCrossEntropy()
-            elif loss_fn == 'focal_loss':
+            elif loss_fn == 'weighted_multi_class_binary_cross_entropy':
+                self.loss_fn[task] = WeightedMultiClassBinaryCrossEntropy()
+            elif loss_fn == 'focalloss':
                 self.loss_fn[task] = FocalLoss()
             elif loss_fn == 'dualityfocalloss':
                 self.loss_fn[task] = DualityFocalLoss()
+            elif loss_fn == 'dualityceloss':
+                self.loss_fn[task] = DualityCELoss()
             elif loss_fn == 'huber_loss':
                 self.loss_fn[task] = HuberLoss()
             elif loss_fn == 'bbox_loss':
@@ -96,7 +101,8 @@ class MultiTaskLoss(nn.Module):
                 task_loss = self.losses[task].cuda()
                 if self.cfg[task]['loss'] in \
                     ['cross_entropy2d', 'weighted_binary_cross_entropy',
-                     'weighted_multiclass_cross_entropy']:
+                     'weighted_multi_class_binary_cross_entropy', 'focalloss',
+                     'dualityfocalloss', 'dualityceloss']:
                     loss += torch.exp(-sigma[i]) * task_loss + \
                         0.5*sigma[i]
                 elif self.cfg[task]['loss'] in \

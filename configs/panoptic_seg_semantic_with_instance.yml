@@ -10,7 +10,7 @@ model:
     semantic_with_instance:
       active: &semantic_with_instance True
       out_channels: 20
-      loss: dualityfocalloss
+      loss: dualityceloss
       loss_weight: 1.0
       metric: dual_classification_metrics
       postproc: semantic_with_instance

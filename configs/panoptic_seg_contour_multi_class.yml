@@ -18,7 +18,7 @@ model:
       active: &contour_active True
       binary: False
       out_channels: 9
-      loss: focal_loss #weighted_binary_cross_entropy
+      loss: weighted_multi_class_binary_cross_entropy
       loss_weight: 1.0
       metric: classification_metrics #binary_metrics # TODO: panoptic_metrics
       postproc: argmax #binary_class

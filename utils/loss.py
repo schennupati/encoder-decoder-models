@@ -20,26 +20,51 @@ from torch.autograd import Variable
 from utils.constants import LENGTH
 
 
-class WeightedBinaryCrossEntropy(nn.Module):
+class WeightedMultiClassBinaryCrossEntropy(nn.Module):
 
-    def __init__(self):
-        super(WeightedBinaryCrossEntropy, self).__init__()
+    def __init__(self, huber_active=True):
+        super(WeightedMultiClassBinaryCrossEntropy, self).__init__()
+        self.bce = WeightedBinaryCrossEntropy(huber_active)
 
     def forward(self, input, target):
+        loss = 0.0
+        num_classes = input.shape[1]
+        for i in range(num_classes):
+            weighted = True if i != 0 else False
+            loss += self.bce(input[:, i, ...], (target == i), weighted)
+        return loss
+
+
+class WeightedBinaryCrossEntropy(nn.Module):
+
+    def __init__(self, huber_active=True):
+        super(WeightedBinaryCrossEntropy, self).__init__()
+        self.huber_active = huber_active
+
+    def forward(self, input, target, weighted=True):
         n_batch = input.shape[0]
         mean_bce = 0.0
         mean_l1 = 0.0
         for _id in range(n_batch):
-            l1_loss = huber_loss(torch.sigmoid(input[_id].squeeze()),
-                                 target[_id].float(), delta=0.3)
-            bce_loss = \
-                F.binary_cross_entropy_with_logits(input[_id].squeeze(),
-                                                   target[_id].float(),
-                                                   get_weight_mask(
+            if weighted:
+                bce_loss = \
+                    F.binary_cross_entropy_with_logits(input[_id].squeeze(),
+                                                       target[_id].float(),
+                                                       get_weight_mask(
                                                        target[_id].float()),
-                                                   size_average=True)
-            mean_l1 += l1_loss
+                                                       size_average=True)
+            else:
+                bce_loss = \
+                    F.binary_cross_entropy_with_logits(input[_id].squeeze(),
+                                                       target[_id].float(),
+                                                       size_average=True)
             mean_bce += bce_loss
+
+            if self.huber_active:
+                l1_loss = huber_loss(torch.sigmoid(input[_id].squeeze()),
+                                     target[_id].float(), delta=0.3)
+                mean_l1 += l1_loss
+
         mean_bce /= n_batch
         mean_l1 /= n_batch
         return mean_l1 + 10*mean_bce

@@ -94,11 +94,15 @@ class panopticMetrics(object):
         self.reset()
 
     def reset(self):
-        metric_items = ['iou', 'tp', 'fp', 'fn', 'cov', 'ap']
+        metric_items = ['iou', 'tp', 'fp', 'fn']
         self.metrics = {metric: {} for metric in metric_items}
+        self.size_metrics = {metric: {} for metric in metric_items}
         for label in labels:
             if label.ignoreInEval:
                 continue
+            for metric in metric_items:
+                self.metrics[metric].update({label.trainId: 0})
+        for size in ['s', 'm', 'l']:
             for metric in metric_items:
                 self.metrics[metric].update({label.trainId: 0})
 
@@ -125,6 +129,14 @@ class panopticMetrics(object):
         self.get_fn()
         self.get_fp()
 
+    def get_size_id(self, area):
+        if area < 1000.0:
+            return 's'
+        elif (area >= 1000.0) and (area < 10000.0):
+            return 'm'
+        else:
+            return 'l'
+
     def get_scores(self):
         """Returns accuracy score evaluation result.
             - PQ
@@ -140,26 +152,34 @@ class panopticMetrics(object):
         fp = np.array(list(self.metrics['fp'].values()))
         fn = np.array(list(self.metrics['fn'].values()))
 
+        size_iou = np.array(list(self.size_metrics['iou'].values()))
+        size_tp = np.array(list(self.size_metrics['tp'].values()))
+        size_fp = np.array(list(self.size_metrics['fp'].values()))
+        size_fn = np.array(list(self.size_metrics['fn'].values()))
+
         sq = iou / tp
         rq = tp / (tp + 0.5 * fp + 0.5 * fn)
         pq = iou / (tp + 0.5 * fp + 0.5 * fn)
-        precision = tp / (np.max((tp + fp, 1)))
-        recall = tp / (np.max((tp + fn, 1)))
+
+        size_sq = size_iou / size_tp
+        size_rq = size_tp / (size_tp + 0.5 * size_fp + 0.5 * size_fn)
+        size_pq = size_iou / (size_tp + 0.5 * size_fp + 0.5 * size_fn)
 
         mean_metrics = {"Mean PQ": self.get_mean_metric(pq),
                         "Mean RQ": self.get_mean_metric(sq),
                         "Mean SQ": self.get_mean_metric(rq),
-                        "Mean AP": self.get_mean_metric(ap[11:]),
                         "Mean PQSt": self.get_mean_metric(pq[:11]),
                         "Mean RQSt": self.get_mean_metric(sq[:11]),
                         "Mean SQSt": self.get_mean_metric(rq[:11]),
                         "Mean PQTh": self.get_mean_metric(pq[11:]),
                         "Mean RQTh": self.get_mean_metric(sq[11:]),
-                        "Mean SQTh": self.get_mean_metric(rq[11:])}
+                        "Mean SQTh": self.get_mean_metric(rq[11:]),
+                        "Mean PQSmall": self.get_mean_metric(size_pq[0]),
+                        "Mean PQMedium": self.get_mean_metric(size_pq[1]),
+                        "Mean PQLarge": self.get_mean_metric(size_pq[2])}
         class_metrics = {'pq': pq,
                          'rq': rq,
-                         'sq': sq,
-                         'ap': ap}
+                         'sq': sq}
 
         return mean_metrics, class_metrics
 
@@ -212,8 +232,11 @@ class panopticMetrics(object):
             iou = intersection / union
             if iou > 0.5:
                 true_cat_id = self.true_segms[true_id]['category_id']
+                size_id = self.get_size_id(self.true_segms[true_id]['area'])
                 self.metrics['tp'][true_cat_id] += 1
                 self.metrics['iou'][true_cat_id] += iou
+                self.size_metrics['tp'][size_id] += 1
+                self.size_metrics['iou'][size_id] += iou
                 self.true_matched.add(true_id)
                 self.pred_matched.add(pred_id)
 
@@ -228,7 +251,9 @@ class panopticMetrics(object):
             if true_seg_info['iscrowd'] == 1:
                 self.crowd_labels_dict[true_cat_id] = true_id
                 continue
+            size_id = self.get_size_id(self.true_segms[true_id]['area'])
             self.metrics['fn'][true_cat_id] += 1
+            self.size_metrics['fn'][size_id] += 1
 
     def get_fp(self):
         # count false positives
@@ -247,7 +272,9 @@ class panopticMetrics(object):
             # correspond to VOID and CROWD regions
             if intersection / pred_seg_info['area'] > 0.5:
                 continue
+            size_id = self.get_size_id(pred_seg_info['area'])
             self.metrics['fp'][pred_cat_id] += 1
+            self.size_metrics[fp][size_id] += 1
 
 
 class metrics:
